@@ -377,16 +377,17 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       `}</style>
 
       {/* ── Page Header ─────────────────────────────────────────────────────── */}
+      {/* ── Page Header & Top Action ────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
         <div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 font-mono">
-            2 · Evidence Files
+            2 · Evidence Vault
           </span>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-0.5">
             Uploaded Evidence &amp; Extracted Text
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Inspect screenshots, emails, and bank receipts. Hover any highlight box to match it with the extracted text on the right.
+            Inspect screenshots, transaction records, and communication logs. Hover highlighted boxes to correlate extracted text.
           </p>
         </div>
 
@@ -400,8 +401,8 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
         </button>
       </div>
 
-      {/* ── 3-Column Layout: [Left File List] + [Centre Light Viewer] + [Right Inspector] ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[310px_minmax(0,1fr)_380px] gap-6 items-start min-w-0">
+      {/* ── Balanced 3-Column Layout: [Left File List] + [Centre Viewer] + [Right Inspector] ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)_360px] lg:grid-cols-[260px_minmax(0,1fr)_330px] gap-5 items-start min-w-0">
         {/* ===================================================================
             COLUMN 1: LEFT LIST OF FILES (Shared Spring Switcher)
             =================================================================== */}
@@ -513,11 +514,11 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
             <>
               {/* Clean Light Viewer Toolbar */}
               <div className="px-5 py-3 bg-[#F6F8FC] border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 min-w-0">
-                <div className="min-w-0 flex items-center gap-2.5">
+                <div className="min-w-0 flex-1 flex items-center gap-2.5">
                   <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
                     {selectedEvidence.evidenceCode}
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <h2
                       className="text-sm font-bold text-slate-900 truncate"
                       title={selectedEvidence.originalFilename}

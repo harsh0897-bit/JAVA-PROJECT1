@@ -206,7 +206,7 @@ startxref
     const method = (init?.method || 'GET').toUpperCase();
     const bodyText = typeof init?.body === 'string' ? init.body : '';
     const bodyJson: Record<string, any> = bodyText ? safeParseJson(bodyText) : {};
-    let uploadedFile: File | null = null;
+    let uploadedFile: any = null;
 
     if (typeof FormData !== 'undefined' && init?.body instanceof FormData) {
       init.body.forEach((val, key) => {

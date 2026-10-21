@@ -881,9 +881,9 @@ export function App() {
 
       {/* Global Search Modal (Cmd+K) */}
       {showSearchModal && (
-        <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-start justify-center pt-20 px-4">
-          <div className="bg-white border border-[#DCE2E8] rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[#202733]">
-            <div className="p-4 border-b border-[#DCE2E8] flex items-center gap-3 bg-[#F0F2F4]">
+        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-md flex items-start justify-center pt-20 px-4">
+          <div className="cf-glass-panel border border-white/90 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[#202733]">
+            <div className="p-4 border-b border-slate-200/60 flex items-center gap-3 bg-white/60 backdrop-blur-xs">
               <Search className="w-5 h-5 text-[#2563EB]" />
               <input
                 type="text"
@@ -923,7 +923,7 @@ export function App() {
                               setActiveTab('GRAPH');
                               setShowSearchModal(false);
                             }}
-                            className="p-3 rounded-xl bg-[#F0F2F4] hover:bg-[#E2E6EA] border border-[#DCE2E8] cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
+                            className="p-3 rounded-xl bg-white/70 hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
                           >
                             <div>
                               <span className="font-semibold text-[#202733]">
@@ -955,7 +955,7 @@ export function App() {
                             setActiveTab('EVIDENCE');
                             setShowSearchModal(false);
                           }}
-                          className="p-3 rounded-xl bg-[#F0F2F4] hover:bg-[#E2E6EA] border border-[#DCE2E8] cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
+                          className="p-3 rounded-xl bg-white/70 hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
                         >
                           <div>
                             <span className="font-mono font-bold text-[#2563EB] mr-2">
@@ -981,12 +981,12 @@ export function App() {
 
       {/* Create New Investigation Case Modal */}
       {showNewCaseModal && (
-        <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center px-4">
+        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-md flex items-center justify-center px-4">
           <form
             onSubmit={handleCreateNewCase}
-            className="bg-white border border-[#DCE2E8] rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 text-[#202733]"
+            className="cf-glass-panel border border-white/90 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 text-[#202733]"
           >
-            <div className="flex items-center justify-between border-b border-[#DCE2E8] pb-3">
+            <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-[#2563EB]" />
                 <h3 className="text-base font-bold text-[#202733]">

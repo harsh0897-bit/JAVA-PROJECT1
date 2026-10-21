@@ -190,54 +190,39 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
 
   return (
     <div
-      className="w-full min-w-0 overflow-x-clip text-cfx-text-primary flex flex-col font-sans selection:bg-blue-100 selection:text-slate-900"
+      className="w-full min-w-0 text-cfx-text-primary flex flex-col font-sans selection:bg-blue-100 selection:text-slate-900"
       style={{ paddingTop: '88px' }}
     >
       {/* =========================================================================
-          1. FIXED GLASS NAVBAR (Section 5: Fixed at top, generously spaced links)
+          1. FIXED GLASS NAVBAR (Aligned with 1680px editorial content, responsive gutters)
           ========================================================================= */}
       <header
         data-scrolled={isScrolled ? 'true' : 'false'}
-        className="cf-liquid-shell"
-        style={{
-          position: 'fixed',
-          top: '12px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 50,
-          width: 'min(1320px, calc(100vw - 32px))',
-          padding: '8px 14px',
-          borderRadius: '9999px',
-        }}
+        className="cf-liquid-shell fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1.5rem)] sm:w-[calc(100%-2.5rem)] lg:w-[calc(100%-3rem)] max-w-[1680px] rounded-full px-4 sm:px-6 py-2.5 transition-all duration-300"
       >
         <div className="w-full flex items-center justify-between gap-4 min-w-0">
           {/* Left: Brand Identity (flex-shrink: 0) */}
-          <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-[#2563EB] flex items-center justify-center text-white shrink-0">
-              <Shield className="w-5 h-5" />
+          <div className="flex items-center gap-3 min-w-0 shrink-0">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] flex items-center justify-center text-white shadow-xs shrink-0 border border-white/40">
+              <Shield className="w-5 h-5 text-white" />
             </div>
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="font-bold text-base tracking-tight text-slate-900 truncate">
+                <span className="font-extrabold text-base tracking-tight text-slate-900 truncate">
                   CyberFusion <span className="text-[#2563EB]">X</span>
                 </span>
-                <span className="hidden lg:inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
-                  Digital forensics lab
+                <span className="hidden xl:inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50/80 text-blue-700 border border-blue-200/80 shrink-0">
+                  Digital Forensics Lab
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Middle: Generously spaced links (margin: 0 auto, gap: clamp(28px, 3.2vw, 48px)) */}
+          {/* Middle: Generously spaced links */}
           {!isMobileNav && (
             <nav
               aria-label="Home page sections"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'clamp(28px, 3.2vw, 48px)',
-                margin: '0 auto',
-              }}
+              className="flex items-center gap-2 sm:gap-3 lg:gap-6 mx-auto"
             >
               {visibleLinks.map((item) => {
                 const isActive = activeNavSection === item.id;
@@ -246,16 +231,10 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
                     key={item.id}
                     type="button"
                     onClick={() => handleNavChange(item.id)}
-                    style={{
-                      padding: '8px 14px',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      whiteSpace: 'nowrap',
-                    }}
-                    className={`rounded-full transition cursor-pointer ${
+                    className={`px-3.5 py-2 rounded-full text-sm font-semibold transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-[#2563EB] text-white'
-                        : 'text-slate-700 hover:text-slate-900 hover:bg-white/60'
+                        ? 'bg-[#2563EB] text-white shadow-sm shadow-blue-500/25'
+                        : 'text-slate-700 hover:text-slate-900 hover:bg-white/70'
                     }`}
                   >
                     {item.label}
@@ -268,26 +247,20 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setMoreMenuOpen((v) => !v)}
-                    style={{
-                      padding: '8px 14px',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      whiteSpace: 'nowrap',
-                    }}
-                    className="rounded-full text-slate-700 hover:text-slate-900 hover:bg-white/60 inline-flex items-center gap-1 cursor-pointer"
+                    className="px-3.5 py-2 rounded-full text-sm font-semibold text-slate-700 hover:text-slate-900 hover:bg-white/70 inline-flex items-center gap-1 cursor-pointer"
                   >
                     <span>More</span>
                     <ChevronDown className="w-3.5 h-3.5" />
                   </button>
 
                   {moreMenuOpen && (
-                    <div className="cf-popover absolute right-0 mt-2 w-48 p-2 z-50">
+                    <div className="cf-pop absolute right-0 mt-2 w-48 p-2 z-50">
                       {overflowLinks.map((item) => (
                         <button
                           key={item.id}
                           type="button"
                           onClick={() => handleNavChange(item.id)}
-                          className={`w-full text-left px-3.5 py-2 rounded-xl text-sm font-medium transition cursor-pointer ${
+                          className={`w-full text-left px-3.5 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
                             activeNavSection === item.id
                               ? 'bg-[#EAF1FF] text-[#1D4ED8]'
                               : 'text-slate-700 hover:bg-white/70'
@@ -303,13 +276,23 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
             </nav>
           )}
 
-          {/* Right: Menu button (<900px) + Primary CTA (flex-shrink: 0) */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            {!isAuthenticated && (
+              <button
+                type="button"
+                onClick={() => onOpenAuthPortal('LOGIN')}
+                className="hidden md:inline-flex cf-droplet-idle px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-blue-700 cursor-pointer"
+              >
+                Sign In
+              </button>
+            )}
+
             {isMobileNav && (
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen((v) => !v)}
-                className="cf-droplet-idle px-3.5 py-2 rounded-full text-sm font-medium text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
+                className="cf-droplet-idle px-3 py-1.5 rounded-full text-xs font-semibold text-slate-800 inline-flex items-center gap-1.5 cursor-pointer"
                 aria-expanded={mobileMenuOpen}
               >
                 {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
@@ -320,7 +303,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
             <button
               type="button"
               onClick={() => handlePrimaryAction('OVERVIEW')}
-              className="cf-btn-blue inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
+              className="cf-btn-blue inline-flex items-center justify-center gap-1.5 px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
             >
               <span>Enter workspace</span>
               <ArrowRight className="w-4 h-4" />
@@ -330,13 +313,13 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
 
         {/* Mobile Glass Sheet (<900px) */}
         {isMobileNav && mobileMenuOpen && (
-          <div className="cf-popover mt-3 p-3 flex flex-col gap-1">
+          <div className="cf-pop mt-2 p-3 flex flex-col gap-1 w-full rounded-2xl">
             {HOME_LINKS.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleNavChange(item.id)}
-                className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer ${
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition cursor-pointer ${
                   activeNavSection === item.id
                     ? 'bg-[#EAF1FF] text-[#1D4ED8]'
                     : 'text-slate-700 hover:bg-white/70'

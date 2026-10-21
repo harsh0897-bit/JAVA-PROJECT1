@@ -149,14 +149,13 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
     >
       {isStepper && (
         <style>{`
-          @container shell (max-width:1100px){
-            .cf-stepper-tab[aria-selected="false"] .cf-step-stage-row{display:none!important}
-            .cf-stepper-tab[aria-selected="false"]{padding-right:0.875rem!important}
+          @container shell (max-width:960px){
+            .cf-stepper-tab .cf-step-stage-row{display:none!important}
           }
           @container shell (max-width:720px){
             .cf-stepper-track{overflow-x:auto!important;scroll-snap-type:x mandatory!important}
-            .cf-stepper-tab{flex:0 0 auto!important}
-            .cf-step-connector{flex:0 0 10px!important}
+            .cf-stepper-tab{flex:0 0 auto!important; min-width:60px!important}
+            .cf-step-connector{flex:0 0 8px!important}
           }
         `}</style>
       )}
@@ -171,7 +170,7 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
         const panelDomId = idPrefix ? `${idPrefix}-panel-${item.id}` : `panel-${item.id}`;
 
         const buttonSizeClasses = isStepper
-          ? 'cf-stepper-tab flex-[1_1_auto] h-[var(--row2,60px)] pl-[0.375rem] pr-[1.25rem] gap-[0.75rem]'
+          ? 'cf-stepper-tab flex-1 min-w-0 h-[var(--row2,60px)] px-3 gap-2.5 items-center justify-start'
           : isDark
           ? 'flex-none shrink-0 h-8 px-3 gap-1.5'
           : 'flex-none shrink-0 h-9 px-4 gap-2';
@@ -234,28 +233,28 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
               ) : isStepper ? (
                 <>
                   {item.icon && (
-                    <span style={labelColorStyle} className="cf-bubble">
+                    <span style={labelColorStyle} className="cf-bubble shrink-0">
                       {renderTabIcon(item.icon, 'w-5 h-5')}
                     </span>
                   )}
 
-                  <span className="flex flex-col items-start text-left leading-tight whitespace-nowrap min-w-0">
+                  <span className="flex flex-col justify-center items-start text-left min-w-0 h-[36px]">
                     {item.sublabel && (
                       <span
                         style={labelColorStyle}
                         className={clsx(
-                          'font-mono text-[12px] font-semibold leading-none tabular-nums whitespace-nowrap',
+                          'font-mono text-[11px] font-semibold tracking-wider uppercase leading-none tabular-nums truncate',
                           isActive ? 'text-white/90' : 'text-slate-500'
                         )}
                       >
                         {item.sublabel}
                       </span>
                     )}
-                    <span className="cf-step-stage-row flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="cf-step-stage-row flex items-center gap-1.5 min-w-0 h-[18px] mt-1">
                       <span
                         style={labelColorStyle}
                         className={clsx(
-                          'text-[15px] font-semibold tracking-tight leading-snug whitespace-nowrap',
+                          'text-[13.5px] font-semibold tracking-tight leading-none truncate',
                           isActive ? 'text-white' : 'text-slate-800'
                         )}
                       >
@@ -266,7 +265,7 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
                         <span
                           style={labelColorStyle}
                           className={clsx(
-                            'inline-flex px-1.5 h-[18px] min-w-[18px] rounded-full items-center justify-center text-[12px] font-mono font-semibold tabular-nums shrink-0',
+                            'inline-flex px-1.5 h-[17px] min-w-[17px] rounded-full items-center justify-center text-[11px] font-mono font-bold leading-none tabular-nums shrink-0',
                             isActive
                               ? 'bg-white/25 text-white'
                               : 'bg-slate-900/[0.06] text-slate-600'

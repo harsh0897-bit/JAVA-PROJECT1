@@ -551,7 +551,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         {/* 2. Divider */}
         <div
           aria-hidden="true"
-          className="h-8 w-px bg-slate-300/60 shrink-0 min-w-0 cf-hide-xs"
+          className="h-8 w-px bg-slate-300/60 border-r border-white/90 shrink-0 min-w-0 cf-hide-xs"
         />
 
         {/* 3. Case selector (Case ID only, no case title in the shell) */}
@@ -714,7 +714,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </button>
 
           {/* 1px divider */}
-          <div aria-hidden="true" className="h-8 w-px bg-slate-300/60 shrink-0" />
+          <div aria-hidden="true" className="h-8 w-px bg-slate-300/60 border-r border-white/90 shrink-0" />
 
           {/* Avatar (48px circle with persona initials, light/blue surface, no dark navy or glow) */}
           <button

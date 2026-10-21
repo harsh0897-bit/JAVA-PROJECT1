@@ -764,6 +764,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanningCanvas, setIsPanningCanvas] = useState<boolean>(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const canvasPanMovedRef = useRef<boolean>(false);
 
   // Selection & hover state
   const [canvasSelectedNodeId, setCanvasSelectedNodeId] = useState<string | null>(
@@ -843,6 +844,19 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
       setCanvasSelectedNodeId(selectedEntityId);
     }
   }, [selectedEntityId]);
+
+  // Escape key clears transient/pinned selection and edge inspection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setCanvasSelectedNodeId(null);
+        setHoveredEntityId(null);
+        setSelectedEdgeId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Synchronize default From & To dropdowns
   useEffect(() => {
@@ -983,7 +997,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     setRenderTick((t) => t + 1);
   };
 
-  // Zoom to fit all nodes (or active route)
+  // Zoom to fit all nodes (or active route) with balanced padding preventing label clipping
   const fitNodesInView = useCallback(
     (nodeIdsToFit?: string[]) => {
       const ids =
@@ -1010,16 +1024,23 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
         if (p.y > maxY) maxY = p.y;
       });
 
-      const pad = 110;
-      const boxW = Math.max(240, maxX - minX + pad * 2);
-      const boxH = Math.max(180, maxY - minY + pad * 2);
+      // Include node circle radius (22px) and bottom label clearance (40px)
+      const padX = 72;
+      const padY = 56;
+      const contentMinX = minX - NODE_R - padX;
+      const contentMaxX = maxX + NODE_R + padX;
+      const contentMinY = minY - NODE_R - padY;
+      const contentMaxY = maxY + NODE_R + 36 + padY;
+
+      const boxW = Math.max(300, contentMaxX - contentMinX);
+      const boxH = Math.max(220, contentMaxY - contentMinY);
       const targetZoom = Math.max(
-        0.75,
-        Math.min(1.45, Math.min(SVG_W / boxW, SVG_H / boxH))
+        0.65,
+        Math.min(1.4, Math.min(SVG_W / boxW, SVG_H / boxH))
       );
 
       const midX = (minX + maxX) / 2;
-      const midY = (minY + maxY) / 2;
+      const midY = (minY + maxY + 18) / 2;
       const cx = SVG_W / 2;
       const cy = SVG_H / 2;
 
@@ -1032,15 +1053,21 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     [entities]
   );
 
-  // Canvas background pan & wheel zoom (0.6x - 2.0x)
+  // Canvas background pan & smooth pointer-centered wheel zoom (0.5x - 2.5x)
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (draggingNodeIdRef.current) return;
     setIsPanningCanvas(true);
+    canvasPanMovedRef.current = false;
     panStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (!isPanningCanvas || draggingNodeIdRef.current) return;
+    const dx = e.clientX - (panStartRef.current.x + pan.x);
+    const dy = e.clientY - (panStartRef.current.y + pan.y);
+    if (Math.hypot(dx, dy) > 3) {
+      canvasPanMovedRef.current = true;
+    }
     setPan({
       x: e.clientX - panStartRef.current.x,
       y: e.clientY - panStartRef.current.y,
@@ -1053,19 +1080,51 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
 
   const handleCanvasWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 0.12 : -0.12;
-    setZoom((z) => Math.max(0.6, Math.min(2.0, Number((z + factor).toFixed(2)))));
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const relX = ((e.clientX - rect.left) / rect.width) * SVG_W;
+    const relY = ((e.clientY - rect.top) / rect.height) * SVG_H;
+    const cx = SVG_W / 2;
+    const cy = SVG_H / 2;
+
+    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
+    const currentZoom = zoom;
+    const newZoom = Math.max(0.5, Math.min(2.5, Number((currentZoom * zoomFactor).toFixed(3))));
+    if (Math.abs(newZoom - currentZoom) < 0.001) return;
+
+    const scaleRatio = newZoom / currentZoom;
+    const newPanX = pan.x + (relX - cx - pan.x) * (1 - scaleRatio);
+    const newPanY = pan.y + (relY - cy - pan.y) * (1 - scaleRatio);
+
+    setZoom(newZoom);
+    setPan({
+      x: Math.round(Math.max(-SVG_W * 1.5, Math.min(SVG_W * 1.5, newPanX))),
+      y: Math.round(Math.max(-SVG_H * 1.5, Math.min(SVG_H * 1.5, newPanY))),
+    });
   };
 
-  // Active entity for Right Detail Card
+  // Active entity for Right Detail Card:
+  // Shows hovered entity for immediate live preview, falling back stably to pinned selection or default
   const selectedEntity = useMemo(() => {
-    const activeId = canvasSelectedNodeId || selectedEntityId;
+    const activeId = hoveredEntityId || canvasSelectedNodeId || selectedEntityId;
     if (activeId) {
       const found = entities.find((e) => e.id === activeId);
       if (found) return found;
     }
     return entities[0] || null;
-  }, [entities, canvasSelectedNodeId, selectedEntityId]);
+  }, [entities, hoveredEntityId, canvasSelectedNodeId, selectedEntityId]);
+
+  // Hovered node details for instant floating SVG tooltip
+  const hoveredEntity = useMemo(
+    () => (hoveredEntityId ? entities.find((e) => e.id === hoveredEntityId) || null : null),
+    [hoveredEntityId, entities]
+  );
+  const hoveredPos = hoveredEntity ? simNodesRef.current[hoveredEntity.id] : null;
+
+  // Persistent focus node for neighbourhood highlighting:
+  // Hovered node takes active precedence; if no hover, pinned canvasSelectedNodeId keeps its neighborhood highlighted
+  const focusNodeId = hoveredEntityId || canvasSelectedNodeId;
 
   // Connected neighbours for the selected entity
   const connectedNeighbors = useMemo(() => {
@@ -1371,7 +1430,10 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
             onMouseLeave={handleCanvasMouseUp}
             onWheel={handleCanvasWheel}
             onClick={() => {
-              setSelectedEdgeId(null);
+              if (!canvasPanMovedRef.current) {
+                setSelectedEdgeId(null);
+                setCanvasSelectedNodeId(null);
+              }
             }}
             style={{
               height: 'clamp(460px, 60vh, 600px)',
@@ -1402,7 +1464,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                   }
                 `}</style>
 
-                {/* Ordinary soft drop shadow for nodes (0 2px 6px rgba(16,24,40,.18)) */}
+                {/* Soft drop shadow for nodes and tooltips */}
                 <filter
                   id="node-soft-shadow"
                   x="-25%"
@@ -1415,20 +1477,47 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                     dy="2"
                     stdDeviation="2.5"
                     floodColor="#101828"
-                    floodOpacity="0.18"
+                    floodOpacity="0.16"
                   />
                 </filter>
 
+                {/* Quiet default arrow (subtle, low contrast) */}
                 <marker
                   id="edge-arrow-default"
                   viewBox="0 0 10 10"
                   refX="7"
                   refY="5"
-                  markerWidth="5"
-                  markerHeight="5"
+                  markerWidth="4.5"
+                  markerHeight="4.5"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#B7C3D8" />
+                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#94A3B8" opacity="0.65" />
+                </marker>
+
+                {/* Substantially dimmed arrow for non-focused edges */}
+                <marker
+                  id="edge-arrow-quiet"
+                  viewBox="0 0 10 10"
+                  refX="7"
+                  refY="5"
+                  markerWidth="4"
+                  markerHeight="4"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#CBD5E1" opacity="0.35" />
+                </marker>
+
+                {/* Focused / Hovered neighborhood arrow */}
+                <marker
+                  id="edge-arrow-focused"
+                  viewBox="0 0 10 10"
+                  refX="7"
+                  refY="5"
+                  markerWidth="5.5"
+                  markerHeight="5.5"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#2563EB" />
                 </marker>
 
                 <marker
@@ -1440,16 +1529,17 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                   markerHeight="5"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#475467" />
+                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#334155" />
                 </marker>
 
+                {/* Animated Route arrow */}
                 <marker
                   id="edge-arrow-route"
                   viewBox="0 0 10 10"
                   refX="7"
                   refY="5"
-                  markerWidth="5"
-                  markerHeight="5"
+                  markerWidth="5.5"
+                  markerHeight="5.5"
                   orient="auto-start-reverse"
                 >
                   <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#2563EB" />
@@ -1462,31 +1552,68 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                   transformOrigin: 'center center',
                   transition: isPanningCanvas
                     ? 'none'
-                    : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
-                {/* ── Layer 1: Edges ──────────────────────────────────────── */}
+                {/* ── Layer 1: Edges with Progressive Hierarchy ─────────────── */}
                 <g>
                   {renderedEdges.map(({ edge, d, inRoute }) => {
-                    const isHovered = hoveredEdgeId === edge.id;
+                    const isHoveredEdge = hoveredEdgeId === edge.id;
                     const isSelectedEdge = selectedEdgeId === edge.id;
-                    const isConnectedToHoveredNode =
-                      hoveredEntityId !== null &&
-                      (edge.sourceId === hoveredEntityId ||
-                        edge.targetId === hoveredEntityId);
+                    const isConnectedToFocus =
+                      focusNodeId !== null &&
+                      (edge.sourceId === focusNodeId ||
+                        edge.targetId === focusNodeId);
 
-                    let opacity = 1;
+                    let edgeOpacity = 0.28;
+                    let strokeColor = '#94A3B8';
+                    let strokeWidth = 1.2;
+                    let markerEnd = 'url(#edge-arrow-default)';
+
                     if (hasActiveRoute) {
-                      opacity = inRoute ? 1 : 0.15;
-                    } else if (hoveredEntityId !== null) {
-                      opacity = isConnectedToHoveredNode ? 1 : 0.35;
+                      if (inRoute) {
+                        edgeOpacity = 1.0;
+                        strokeColor = '#2563EB';
+                        strokeWidth = 3.5;
+                        markerEnd = 'url(#edge-arrow-route)';
+                      } else {
+                        edgeOpacity = 0.08;
+                        strokeColor = '#CBD5E1';
+                        strokeWidth = 1.0;
+                        markerEnd = 'url(#edge-arrow-quiet)';
+                      }
+                    } else if (focusNodeId !== null) {
+                      if (isConnectedToFocus || isHoveredEdge || isSelectedEdge) {
+                        edgeOpacity = 0.95;
+                        strokeColor = '#2563EB';
+                        strokeWidth = 2.2;
+                        markerEnd = 'url(#edge-arrow-focused)';
+                      } else {
+                        edgeOpacity = 0.10;
+                        strokeColor = '#CBD5E1';
+                        strokeWidth = 1.0;
+                        markerEnd = 'url(#edge-arrow-quiet)';
+                      }
+                    } else {
+                      // Default state: quiet, clean hierarchy
+                      if (isHoveredEdge || isSelectedEdge) {
+                        edgeOpacity = 0.95;
+                        strokeColor = '#2563EB';
+                        strokeWidth = 2.2;
+                        markerEnd = 'url(#edge-arrow-focused)';
+                      } else {
+                        edgeOpacity = 0.28;
+                        strokeColor = '#94A3B8';
+                        strokeWidth = 1.2;
+                        markerEnd = 'url(#edge-arrow-default)';
+                      }
                     }
 
                     if (inRoute) {
                       return (
                         <g
                           key={edge.id}
-                          opacity={opacity}
+                          opacity={edgeOpacity}
                           onMouseEnter={() => setHoveredEdgeId(edge.id)}
                           onMouseLeave={() => setHoveredEdgeId(null)}
                           onClick={(e) => {
@@ -1501,16 +1628,16 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             d={d}
                             fill="none"
                             stroke="transparent"
-                            strokeWidth={12}
+                            strokeWidth={14}
                           />
-                          {/* 4px solid --brand base */}
+                          {/* 4px solid brand base */}
                           <path
                             d={d}
                             fill="none"
                             stroke="#2563EB"
                             strokeWidth={4}
                             strokeOpacity={0.32}
-                            markerEnd="url(#edge-arrow-route)"
+                            markerEnd={markerEnd}
                           />
                           {/* Flowing dash animation in direction of travel */}
                           <path
@@ -1520,19 +1647,16 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             strokeWidth={4}
                             strokeDasharray="8 6"
                             className="cf-route-dash"
-                            markerEnd="url(#edge-arrow-route)"
+                            markerEnd={markerEnd}
                           />
                         </g>
                       );
                     }
 
-                    const isDarkened =
-                      isHovered || isSelectedEdge || isConnectedToHoveredNode;
-
                     return (
                       <g
                         key={edge.id}
-                        opacity={opacity}
+                        opacity={edgeOpacity}
                         onMouseEnter={() => setHoveredEdgeId(edge.id)}
                         onMouseLeave={() => setHoveredEdgeId(null)}
                         onClick={(e) => {
@@ -1542,6 +1666,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                           );
                         }}
                         className="cursor-pointer"
+                        style={{
+                          transition: 'opacity 180ms ease, stroke 180ms ease',
+                        }}
                       >
                         <path
                           d={d}
@@ -1552,13 +1679,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                         <path
                           d={d}
                           fill="none"
-                          stroke={isDarkened ? '#475467' : '#B7C3D8'}
-                          strokeWidth={isDarkened ? 2 : 1.5}
-                          markerEnd={
-                            isDarkened
-                              ? 'url(#edge-arrow-dark)'
-                              : 'url(#edge-arrow-default)'
-                          }
+                          stroke={strokeColor}
+                          strokeWidth={strokeWidth}
+                          markerEnd={markerEnd}
                         />
                       </g>
                     );
@@ -1573,26 +1696,30 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
 
                     const st = getNodeTypeStyle(entity.entityType);
                     const isHovered = hoveredEntityId === entity.id;
+                    const isCanvasSelected = canvasSelectedNodeId === entity.id;
                     const isSelected = selectedEntity?.id === entity.id;
                     const routeStep = routeInfo.nodeOrder[entity.id];
                     const inRoute = routeStep !== undefined;
 
-                    const isNeighborOfHovered =
-                      hoveredEntityId !== null &&
+                    const isNeighborOfFocus =
+                      focusNodeId !== null &&
+                      focusNodeId !== entity.id &&
                       mergedEdges.some(
                         (me) =>
-                          (me.sourceId === hoveredEntityId &&
+                          (me.sourceId === focusNodeId &&
                             me.targetId === entity.id) ||
-                          (me.targetId === hoveredEntityId &&
+                          (me.targetId === focusNodeId &&
                             me.sourceId === entity.id)
                       );
 
                     let nodeOpacity = 1;
                     if (hasActiveRoute) {
-                      nodeOpacity = inRoute ? 1 : 0.15;
-                    } else if (hoveredEntityId !== null) {
+                      nodeOpacity = inRoute ? 1 : 0.28;
+                    } else if (focusNodeId !== null) {
                       nodeOpacity =
-                        isHovered || isNeighborOfHovered ? 1 : 0.35;
+                        entity.id === focusNodeId || isNeighborOfFocus
+                          ? 1
+                          : 0.35;
                     }
 
                     const isHighRisk = entity.riskLevel === 'CRITICAL';
@@ -1606,14 +1733,32 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                         key={entity.id}
                         transform={`translate(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})`}
                         opacity={nodeOpacity}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`${entity.displayLabel || entity.normalizedValue} (${st.singularLabel})`}
                         onPointerDown={(e) => handleNodePointerDown(e, entity.id)}
                         onPointerMove={(e) => handleNodePointerMove(e, entity.id)}
                         onPointerUp={(e) => handleNodePointerUp(e, entity.id)}
                         onDoubleClick={(e) => handleNodeDoubleClick(e, entity.id)}
                         onMouseEnter={() => setHoveredEntityId(entity.id)}
                         onMouseLeave={() => setHoveredEntityId(null)}
-                        className="cursor-grab active:cursor-grabbing select-none"
-                        style={{ touchAction: 'none' }}
+                        onFocus={() => setHoveredEntityId(entity.id)}
+                        onBlur={() => setHoveredEntityId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setCanvasSelectedNodeId(entity.id);
+                            setSelectedEdgeId(null);
+                            onSelectEntity(entity.id);
+                            if (onSelectEntityForGraph)
+                              onSelectEntityForGraph(entity.id);
+                          }
+                        }}
+                        className="cursor-grab active:cursor-grabbing select-none outline-none focus:outline-none"
+                        style={{
+                          touchAction: 'none',
+                          transition: 'opacity 180ms ease',
+                        }}
                       >
                         <title>{`${entity.displayLabel || entity.normalizedValue} (${st.singularLabel})${pos.pinned ? ' — Pinned (double-click to unpin)' : ''}`}</title>
 
@@ -1624,13 +1769,24 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             transition: 'transform 150ms ease-out',
                           }}
                         >
-                          {/* Route or Selected outer ring (3px --brand) */}
-                          {(inRoute || isSelected) && (
+                          {/* Route or Selected/Pinned outer ring (3px #2563EB) */}
+                          {(inRoute || isCanvasSelected) && (
                             <circle
                               r={NODE_R + 3.5}
                               fill="none"
                               stroke="#2563EB"
                               strokeWidth={3}
+                            />
+                          )}
+
+                          {/* Direct neighbor highlight ring when focus is active */}
+                          {!inRoute && !isCanvasSelected && isNeighborOfFocus && (
+                            <circle
+                              r={NODE_R + 3.0}
+                              fill="none"
+                              stroke="#60A5FA"
+                              strokeWidth={2}
+                              strokeDasharray="4 2"
                             />
                           )}
 
@@ -1704,16 +1860,22 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                           )}
                         </g>
 
-                        {/* Short name under the node (13px, max 16 chars) */}
+                        {/* Short name under the node with halo protection against line crossings */}
                         <text
                           x={0}
                           y={NODE_R + 17}
                           textAnchor="middle"
-                          fill="#141B2D"
-                          fontSize={13}
-                          fontWeight={isSelected || inRoute ? 600 : 500}
+                          fill="#0F172A"
+                          fontSize={12}
+                          fontWeight={isCanvasSelected || inRoute || isHovered ? 600 : 500}
                           fontFamily="Inter, system-ui, sans-serif"
-                          className="pointer-events-none"
+                          className="pointer-events-none select-none"
+                          style={{
+                            paintOrder: 'stroke fill',
+                            stroke: '#F6F8FC',
+                            strokeWidth: 3.5,
+                            strokeLinejoin: 'round',
+                          }}
                         >
                           {shortLabel}
                         </text>
@@ -1762,8 +1924,97 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                     );
                   })}
                 </g>
+
+                {/* ── Layer 4: Immediate Floating Tooltip for Hovered Node ── */}
+                {hoveredEntity && hoveredPos && (() => {
+                  const tipType = getNodeTypeStyle(hoveredEntity.entityType);
+                  const tipTitle = hoveredEntity.displayLabel || hoveredEntity.normalizedValue;
+                  const tipNeighbors = mergedEdges.filter(
+                    (me) => me.sourceId === hoveredEntity.id || me.targetId === hoveredEntity.id
+                  ).length;
+                  const tipSubtitle = `${tipType.singularLabel} · ${tipNeighbors} ${tipNeighbors === 1 ? 'connection' : 'connections'}`;
+
+                  const tipW = Math.max(160, Math.min(270, Math.max(tipTitle.length, tipSubtitle.length) * 7.5 + 28));
+                  const tipH = 46;
+
+                  const isNearTop = hoveredPos.y < 85;
+                  const tipX = Math.max(tipW / 2 + 10, Math.min(SVG_W - tipW / 2 - 10, hoveredPos.x));
+                  const tipY = isNearTop ? hoveredPos.y + NODE_R + 34 : hoveredPos.y - NODE_R - 38;
+
+                  return (
+                    <g
+                      pointerEvents="none"
+                      transform={`translate(${tipX.toFixed(1)}, ${tipY.toFixed(1)})`}
+                    >
+                      <rect
+                        x={-tipW / 2}
+                        y={-tipH / 2}
+                        width={tipW}
+                        height={tipH}
+                        rx={10}
+                        fill="#FFFFFF"
+                        stroke="#CBD5E1"
+                        strokeWidth={1}
+                        filter="url(#node-soft-shadow)"
+                      />
+                      <text
+                        x={0}
+                        y={-4}
+                        textAnchor="middle"
+                        fill="#0F172A"
+                        fontSize={12}
+                        fontWeight={700}
+                        fontFamily="Inter, system-ui, sans-serif"
+                      >
+                        {tipTitle.length > 28 ? `${tipTitle.slice(0, 26)}…` : tipTitle}
+                      </text>
+                      <text
+                        x={0}
+                        y={14}
+                        textAnchor="middle"
+                        fill="#64748B"
+                        fontSize={10.5}
+                        fontWeight={500}
+                        fontFamily="Inter, system-ui, sans-serif"
+                      >
+                        {tipSubtitle}
+                      </text>
+                    </g>
+                  );
+                })()}
               </g>
             </svg>
+
+            {/* Quick Canvas Controls: Zoom In / Zoom Out / Reset */}
+            <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/92 backdrop-blur-md border border-slate-200/90 shadow-sm rounded-xl p-1">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(2.5, Number((z * 1.2).toFixed(2))))}
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-700 text-sm font-bold transition cursor-pointer"
+                title="Zoom in"
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(0.5, Number((z / 1.2).toFixed(2))))}
+                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-700 text-sm font-bold transition cursor-pointer"
+                title="Zoom out"
+                aria-label="Zoom out"
+              >
+                −
+              </button>
+              <div className="w-px h-4 bg-slate-200 mx-0.5" />
+              <button
+                type="button"
+                onClick={() => fitNodesInView(hasActiveRoute ? shortestPath?.nodeIds : undefined)}
+                className="px-2 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-700 text-xs font-semibold transition cursor-pointer"
+                title="Fit to view"
+              >
+                Fit
+              </button>
+            </div>
           </div>
 
           {/* ── Bottom Bar: Path Tracer & Route Strip ──────────────────────── */}

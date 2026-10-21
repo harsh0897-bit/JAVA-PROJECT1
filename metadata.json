@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "CyberFusion X",
+  "description": "AI-Powered Digital Forensics & Fraud Reconstruction Platform",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

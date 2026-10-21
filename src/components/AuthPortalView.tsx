@@ -6,6 +6,7 @@ import {
   UserPlus,
   LogIn,
   ArrowRight,
+  ArrowLeft,
   KeyRound,
   CheckCircle2,
   AlertTriangle,
@@ -263,40 +264,51 @@ export const AuthPortalView: React.FC<AuthPortalViewProps> = ({
   return (
     <div className="min-h-[100dvh] w-full flex flex-col items-center gap-5 p-4 sm:p-6 text-slate-900 font-sans selection:bg-blue-100 selection:text-slate-900">
       {/* =========================================================================
-          1. TOP LIQUID-GLASS CAPSULE HEADER (The ONLY glass element on this page)
+          1. TOP LIQUID-GLASS CAPSULE HEADER (Aligned with 1240px portal layout)
           ========================================================================= */}
-      <header className="cf-liquid-shell rounded-full h-14 px-5 w-full max-w-[1240px] flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="cf-liquid-shell rounded-full min-h-[60px] px-4 sm:px-6 py-2.5 w-full max-w-[1240px] flex items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             type="button"
             onClick={onBackToHome}
-            className="cf-droplet-idle px-3.5 py-1.5 text-slate-700 hover:text-[#1D4ED8] text-xs font-semibold flex items-center gap-1.5 shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
+            className="cf-droplet-idle px-3.5 py-2 text-slate-700 hover:text-[#1D4ED8] text-xs font-semibold flex items-center gap-2 shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
             title="Return to Public Overview"
           >
-            <span>← Back to Overview</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Back to Overview</span>
+            <span className="sm:hidden">Overview</span>
           </button>
 
-          <div className="h-6 w-px bg-slate-400/30 hidden sm:block shrink-0" />
+          <div
+            aria-hidden="true"
+            className="h-7 w-px bg-slate-300/60 border-r border-white/90 shrink-0 hidden xs:block"
+          />
 
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs shrink-0">
-              <Shield className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] text-white flex items-center justify-center shadow-xs shrink-0 border border-white/40">
+              <Shield className="w-4 h-4 text-white" />
             </div>
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 truncate">
-                CyberFusion <span className="text-blue-600">X</span>
+                CyberFusion <span className="text-[#2563EB]">X</span>
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-700 border border-blue-500/20 hidden sm:inline shrink-0">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-700 border border-blue-500/20 hidden md:inline shrink-0">
                 AUTH GATEWAY
               </span>
             </div>
           </div>
         </div>
 
-        <div className="hidden xl:inline-flex cf-droplet-idle px-3.5 py-1.5 items-center gap-2 text-xs font-mono text-slate-700 shrink-0">
+        <div className="cf-glass-pill px-3 py-1.5 flex items-center gap-2 text-xs font-mono text-slate-700 shrink-0">
           <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span className="font-semibold">
+          <span className="font-semibold hidden lg:inline">
             PBKDF2-HMAC-SHA256 · HS256 JWT · RFC-6238 TOTP
+          </span>
+          <span className="font-semibold hidden sm:inline lg:hidden">
+            PBKDF2 · HS256 JWT
+          </span>
+          <span className="font-semibold sm:hidden text-[11px] text-emerald-700">
+            HS256
           </span>
         </div>
       </header>

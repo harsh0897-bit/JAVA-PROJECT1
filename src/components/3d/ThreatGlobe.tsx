@@ -10,6 +10,8 @@ import { ExtractedEntity } from '../../types';
 export interface ThreatGlobeProps {
   entities?: ExtractedEntity[];
   onInspectGraph: () => void;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 export interface GlobeMarker {
@@ -122,8 +124,7 @@ export function latLonToVec3(lat: number, lon: number, r: number = R): THREE.Vec
 }
 
 /**
- * Rasterize world-atlas land-110m onto an offscreen 2D canvas once at module load
- * and sample ~11,000 land dot positions + normals on the unit sphere.
+ * Procedural fallback: sample ~11,000 land dot positions from world-atlas
  */
 interface LandDotSample {
   pos: THREE.Vector3;
@@ -131,6 +132,99 @@ interface LandDotSample {
 }
 
 let cachedLandDots: LandDotSample[] | null = null;
+let cachedLandMask: Uint8ClampedArray | null = null;
+
+export function checkIsLand(lat: number, lon: number): boolean {
+  if (!cachedLandMask) {
+    getLandDotSamples();
+  }
+  if (!cachedLandMask) return false;
+  const W = 720;
+  const H = 360;
+  const x = Math.min(W - 1, Math.max(0, Math.floor(((lon + 180) / 360) * W)));
+  const y = Math.min(H - 1, Math.max(0, Math.floor(((90 - lat) / 180) * H)));
+  const idx = (y * W + x) * 4;
+  return cachedLandMask[idx] > 128;
+}
+
+export function vec3ToLatLon(v: THREE.Vector3): { lat: number; lon: number } {
+  const norm = v.clone().normalize();
+  const lat = Math.asin(Math.max(-1, Math.min(1, norm.y))) * (180 / Math.PI);
+  let lon = Math.atan2(norm.z, -norm.x) * (180 / Math.PI) - 180;
+  while (lon < -180) lon += 360;
+  while (lon > 180) lon -= 360;
+  return { lat, lon };
+}
+
+export interface GeoHoverInfo {
+  isMarker: boolean;
+  isLand: boolean;
+  label: string;
+  detail: string;
+  lat: number;
+  lon: number;
+  markerColor?: string;
+}
+
+export function resolveGeoLocation(lat: number, lon: number): GeoHoverInfo {
+  // 1. Check proximity to case markers (within ~7.5 degrees)
+  for (const m of GLOBE_MARKERS) {
+    const dLat = Math.abs(lat - m.lat);
+    let dLon = Math.abs(lon - m.lon);
+    if (dLon > 180) dLon = 360 - dLon;
+    const distDeg = Math.hypot(dLat, dLon * Math.cos((lat * Math.PI) / 180));
+    if (distDeg < 7.5) {
+      return {
+        isMarker: true,
+        isLand: true,
+        label: m.country,
+        detail: `Case: ${m.role}`,
+        lat,
+        lon,
+        markerColor: m.color,
+      };
+    }
+  }
+
+  // 2. Check if over land
+  const isLand = checkIsLand(lat, lon);
+  if (!isLand) {
+    return {
+      isMarker: false,
+      isLand: false,
+      label: 'Open ocean',
+      detail: 'International waters',
+      lat,
+      lon,
+    };
+  }
+
+  // 3. Known geographic regions on Earth
+  let region = 'Land territory';
+  if (lat > 35 && lat < 72 && lon > -10 && lon < 40) region = 'Europe';
+  else if (lat > 10 && lat < 75 && lon >= 40 && lon < 150) region = 'Asia';
+  else if (lat > 5 && lat < 38 && lon >= 65 && lon < 95) region = 'South Asia';
+  else if (lat >= -35 && lat <= 37 && lon >= -20 && lon <= 55) region = 'Africa';
+  else if (lat > 15 && lat < 72 && lon >= -170 && lon <= -50) region = 'North America';
+  else if (lat >= -60 && lat <= 15 && lon >= -90 && lon <= -30) region = 'South America';
+  else if (lat >= -50 && lat <= 0 && lon >= 110 && lon <= 180) region = 'Oceania';
+  else if (lat <= -60) region = 'Antarctica';
+
+  return {
+    isMarker: false,
+    isLand: true,
+    label: region,
+    detail: 'Terrestrial coordinates',
+    lat,
+    lon,
+  };
+}
+
+export function formatLatLon(lat: number, lon: number): string {
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(1)}°${ns}, ${Math.abs(lon).toFixed(1)}°${ew}`;
+}
 
 function getLandDotSamples(): LandDotSample[] {
   if (cachedLandDots) return cachedLandDots;
@@ -159,9 +253,9 @@ function getLandDotSamples(): LandDotSample[] {
   ctx.fill();
 
   const img = ctx.getImageData(0, 0, W, H).data;
+  cachedLandMask = img;
   const samples: LandDotSample[] = [];
 
-  // Sample on a regular spherical grid so dots have uniform density near poles and equator
   const latSteps = 105;
   for (let i = 1; i < latSteps; i++) {
     const lat = 90 - (i / latSteps) * 180;
@@ -184,14 +278,10 @@ function getLandDotSamples(): LandDotSample[] {
   return samples;
 }
 
-/**
- * Build latitude/longitude grid line segments every 30 degrees
- */
 function buildGraticuleGeometry(): THREE.BufferGeometry {
   const points: THREE.Vector3[] = [];
   const r = R * 1.001;
 
-  // Latitudes every 30 deg (-60, -30, 0, 30, 60)
   for (const lat of [-60, -30, 0, 30, 60]) {
     const segs = 96;
     for (let i = 0; i < segs; i++) {
@@ -201,7 +291,6 @@ function buildGraticuleGeometry(): THREE.BufferGeometry {
     }
   }
 
-  // Longitudes every 30 deg
   for (let lon = -180; lon < 180; lon += 30) {
     const segs = 64;
     for (let i = 0; i < segs; i++) {
@@ -215,7 +304,7 @@ function buildGraticuleGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Instanced Dotted Continents (1 draw call)
+ * Instanced Dotted Continents (Procedural Fallback)
  */
 const DottedContinents: React.FC = () => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -283,7 +372,7 @@ const CountryMarkers3D: React.FC<{
   const markerData = useMemo(() => {
     return GLOBE_MARKERS.map((m) => {
       const normal = latLonToVec3(m.lat, m.lon, 1.0).normalize();
-      const pos = normal.clone().multiplyScalar(R * 1.006);
+      const pos = normal.clone().multiplyScalar(R * 1.008);
       const quat = new THREE.Quaternion().setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
         normal
@@ -352,7 +441,7 @@ const CountryMarkers3D: React.FC<{
 };
 
 /**
- * 4 Hub-and-Spoke Connection Arcs with Bouncing Packet Dot + Short Fading Tail
+ * 4 Hub-and-Spoke Connection Arcs with Traveling Packet Dot + Short Fading Tail
  */
 const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion }) => {
   const packetRefs = useRef<Array<THREE.Mesh | null>>([]);
@@ -367,8 +456,8 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
     return GLOBE_ARCS.map((arc) => {
       const mFrom = GLOBE_MARKERS.find((m) => m.id === arc.from)!;
       const mTo = GLOBE_MARKERS.find((m) => m.id === arc.to)!;
-      const startVec = latLonToVec3(mFrom.lat, mFrom.lon, R * 1.006);
-      const endVec = latLonToVec3(mTo.lat, mTo.lon, R * 1.006);
+      const startVec = latLonToVec3(mFrom.lat, mFrom.lon, R * 1.008);
+      const endVec = latLonToVec3(mTo.lat, mTo.lon, R * 1.008);
       const arcLength = startVec.distanceTo(endVec);
       const midVec = startVec
         .clone()
@@ -399,7 +488,7 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
 
   useFrame((state) => {
     const elapsed = state.clock.elapsedTime;
-    const speed = Math.PI / 2.8; // ~2.8 seconds per pass
+    const speed = Math.PI / 2.8;
 
     arcs.forEach((arc, idx) => {
       const tRaw = elapsed - arc.delay;
@@ -429,39 +518,35 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
     <group>
       {arcs.map((arc, idx) => (
         <group key={`${arc.from}-${arc.to}`}>
-          {/* Thin static arc (#2563EB at 35% opacity) */}
           <mesh geometry={arc.lineGeo}>
-            <meshBasicMaterial color="#2563EB" transparent opacity={0.35} />
+            <meshBasicMaterial color="#2563EB" transparent opacity={0.4} />
           </mesh>
 
-          {/* Bouncing Packet Head */}
           <mesh
             ref={(el) => {
               packetRefs.current[idx] = el;
             }}
             geometry={dotGeo}
           >
-            <meshBasicMaterial color="#2563EB" />
+            <meshBasicMaterial color="#38BDF8" />
           </mesh>
 
-          {/* Short Fading Tail 1 */}
           <mesh
             ref={(el) => {
               tail1Refs.current[idx] = el;
             }}
             geometry={tail1Geo}
           >
-            <meshBasicMaterial color="#2563EB" transparent opacity={0.55} />
+            <meshBasicMaterial color="#2563EB" transparent opacity={0.6} />
           </mesh>
 
-          {/* Short Fading Tail 2 */}
           <mesh
             ref={(el) => {
               tail2Refs.current[idx] = el;
             }}
             geometry={tail2Geo}
           >
-            <meshBasicMaterial color="#2563EB" transparent opacity={0.25} />
+            <meshBasicMaterial color="#2563EB" transparent opacity={0.3} />
           </mesh>
         </group>
       ))}
@@ -469,9 +554,17 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
   );
 };
 
+interface GlobeTextures {
+  day: THREE.Texture | null;
+  bump: THREE.Texture | null;
+  water: THREE.Texture | null;
+  clouds: THREE.Texture | null;
+}
+
 /**
- * Main 3D Globe Scene with Intro Zoom (1.7 -> 3.2 over 2.4s), Damped Spherical Drag/Zoom,
- * Auto-Rotation (0.08 rad/s, pauses on drag/hover + 3s cooldown), and Front-Hemisphere Label Projection
+ * Main 3D Globe Scene with Photo-Real Earth Day Map, Bump, Water Specular, Clouds,
+ * Reliable First-Frame Framing (fit distance based on FOV and aspect ratio),
+ * and Damped Rotation & Label Projection.
  */
 interface GlobeSceneProps {
   selectedMarker: GlobeMarker | null;
@@ -482,8 +575,12 @@ interface GlobeSceneProps {
   lastInteractionTimeRef: React.MutableRefObject<number>;
   sphericalTargetRef: React.MutableRefObject<{ theta: number; phi: number; radius: number }>;
   sphericalCurrentRef: React.MutableRefObject<{ theta: number; phi: number; radius: number }>;
+  velocityRef: React.MutableRefObject<{ theta: number; phi: number }>;
   introDoneRef: React.MutableRefObject<boolean>;
   reducedMotion: boolean;
+  onFirstFrameReady: () => void;
+  onHoverGeo: (info: GeoHoverInfo | null) => void;
+  fitDistance: number;
 }
 
 const easeInOutCubic = (x: number): number =>
@@ -498,23 +595,137 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
   lastInteractionTimeRef,
   sphericalTargetRef,
   sphericalCurrentRef,
+  velocityRef,
   introDoneRef,
   reducedMotion,
+  onFirstFrameReady,
+  onHoverGeo,
+  fitDistance,
 }) => {
-  const { camera, size } = useThree();
+  const { camera, size, gl } = useThree();
   const introStartRef = useRef<number | null>(null);
+  const firstFrameNotifiedRef = useRef<boolean>(false);
+  const cloudMeshRef = useRef<THREE.Mesh>(null);
 
-  const oceanGeo = useMemo(() => new THREE.SphereGeometry(R, 64, 64), []);
-  const rimGeo = useMemo(() => new THREE.SphereGeometry(R * 1.015, 64, 64), []);
+  const [textures, setTextures] = useState<GlobeTextures>({
+    day: null,
+    bump: null,
+    water: null,
+    clouds: null,
+  });
+
+  // Asynchronous texture loading with local -> remote -> procedural fallback
+  useEffect(() => {
+    let active = true;
+    const loader = new THREE.TextureLoader();
+
+    const loadTexture = (
+      localUrl: string,
+      remoteUrl: string,
+      isColor: boolean
+    ): Promise<THREE.Texture | null> => {
+      return new Promise((resolve) => {
+        loader.load(
+          localUrl,
+          (tex) => {
+            if (!active) {
+              tex.dispose();
+              resolve(null);
+              return;
+            }
+            tex.generateMipmaps = true;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            if (isColor) {
+              tex.colorSpace = THREE.SRGBColorSpace;
+              tex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+            }
+            resolve(tex);
+          },
+          undefined,
+          () => {
+            // Attempt remote fallback
+            loader.load(
+              remoteUrl,
+              (remTex) => {
+                if (!active) {
+                  remTex.dispose();
+                  resolve(null);
+                  return;
+                }
+                remTex.generateMipmaps = true;
+                remTex.minFilter = THREE.LinearMipmapLinearFilter;
+                remTex.magFilter = THREE.LinearFilter;
+                if (isColor) {
+                  remTex.colorSpace = THREE.SRGBColorSpace;
+                  remTex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+                }
+                resolve(remTex);
+              },
+              undefined,
+              () => {
+                resolve(null);
+              }
+            );
+          }
+        );
+      });
+    };
+
+    Promise.all([
+      loadTexture(
+        '/earth/earth-day.jpg',
+        'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+        true
+      ),
+      loadTexture(
+        '/earth/earth-bump.png',
+        'https://unpkg.com/three-globe/example/img/earth-topology.png',
+        false
+      ),
+      loadTexture(
+        '/earth/earth-water.png',
+        'https://unpkg.com/three-globe/example/img/earth-water.png',
+        false
+      ),
+      loadTexture(
+        '/earth/earth-clouds.png',
+        'https://threejs.org/examples/textures/planets/earth_clouds_1024.png',
+        false
+      ),
+    ]).then(([day, bump, water, clouds]) => {
+      if (active) {
+        setTextures({ day, bump, water, clouds });
+      } else {
+        day?.dispose();
+        bump?.dispose();
+        water?.dispose();
+        clouds?.dispose();
+      }
+    });
+
+    return () => {
+      active = false;
+      textures.day?.dispose();
+      textures.bump?.dispose();
+      textures.water?.dispose();
+      textures.clouds?.dispose();
+    };
+  }, [gl]);
+
+  const earthGeo = useMemo(() => new THREE.SphereGeometry(R, 64, 64), []);
+  const cloudGeo = useMemo(() => new THREE.SphereGeometry(R * 1.008, 64, 64), []);
+  const rimGeo = useMemo(() => new THREE.SphereGeometry(R * 1.018, 64, 64), []);
   const graticuleGeo = useMemo(() => buildGraticuleGeometry(), []);
 
   useEffect(() => {
     return () => {
-      oceanGeo.dispose();
+      earthGeo.dispose();
+      cloudGeo.dispose();
       rimGeo.dispose();
       graticuleGeo.dispose();
     };
-  }, [oceanGeo, rimGeo, graticuleGeo]);
+  }, [earthGeo, cloudGeo, rimGeo, graticuleGeo]);
 
   const markerVecs = useMemo(() => {
     return GLOBE_MARKERS.map((m) => ({
@@ -533,41 +744,62 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
       introStartRef.current = now;
     }
 
-    // 1. Intro zoom animation (2.4s easeInOutCubic from distance 1.7 to 3.2)
+    if (!firstFrameNotifiedRef.current) {
+      firstFrameNotifiedRef.current = true;
+      onFirstFrameReady();
+    }
+
+    // Slowly rotate clouds independently of earth
+    if (cloudMeshRef.current && !reducedMotion) {
+      cloudMeshRef.current.rotation.y += delta * 0.008;
+    }
+
+    // 1. Framing & Intro: Never start cropped. Intro starts at 1.08*fit and eases into fit over 2.0s
     const introElapsed = now - introStartRef.current;
     if (!introDoneRef.current) {
-      if (reducedMotion || introElapsed >= 2.4) {
+      if (reducedMotion || introElapsed >= 2.0) {
         introDoneRef.current = true;
-        sphericalTargetRef.current.radius = 3.2;
-        sphericalCurrentRef.current.radius = 3.2;
+        sphericalTargetRef.current.radius = fitDistance;
+        sphericalCurrentRef.current.radius = fitDistance;
       } else {
-        const u = easeInOutCubic(Math.min(1, introElapsed / 2.4));
-        const r = THREE.MathUtils.lerp(1.7, 3.2, u);
+        const u = easeInOutCubic(Math.min(1, introElapsed / 2.0));
+        const r = THREE.MathUtils.lerp(fitDistance * 1.08, fitDistance, u);
         sphericalTargetRef.current.radius = r;
         sphericalCurrentRef.current.radius = r;
       }
     } else {
-      // 2. Slow auto-rotation (0.08 rad/s) when not dragging, not hovering, and >3s since last interaction
-      const timeSinceInteract = performance.now() - lastInteractionTimeRef.current;
-      if (
-        !reducedMotion &&
-        !isDraggingRef.current &&
-        !isHoveringRef.current &&
-        !selectedMarker &&
-        timeSinceInteract > 3000
-      ) {
-        sphericalTargetRef.current.theta += delta * 0.08;
+      // 2. Slow auto-rotation or inertia decay
+      if (!isDraggingRef.current) {
+        if (Math.abs(velocityRef.current.theta) > 0.00003 || Math.abs(velocityRef.current.phi) > 0.00003) {
+          sphericalTargetRef.current.theta += velocityRef.current.theta;
+          sphericalTargetRef.current.phi = Math.max(
+            0.42,
+            Math.min(Math.PI - 0.42, sphericalTargetRef.current.phi + velocityRef.current.phi)
+          );
+          velocityRef.current.theta *= 0.90;
+          velocityRef.current.phi *= 0.90;
+        } else {
+          const timeSinceInteract = performance.now() - lastInteractionTimeRef.current;
+          if (
+            !reducedMotion &&
+            !isHoveringRef.current &&
+            !selectedMarker &&
+            timeSinceInteract > 3000
+          ) {
+            sphericalTargetRef.current.theta += delta * 0.07;
+          }
+        }
       }
     }
 
-    // Clamp polar angle phi and zoom radius
+    // Clamp polar angle phi and zoom radius relative to fit distance
     sphericalTargetRef.current.phi = Math.max(
-      0.35,
-      Math.min(Math.PI - 0.35, sphericalTargetRef.current.phi)
+      0.42,
+      Math.min(Math.PI - 0.42, sphericalTargetRef.current.phi)
     );
     sphericalTargetRef.current.radius = Math.max(
-      1.5,
-      Math.min(4.5, sphericalTargetRef.current.radius)
+      fitDistance * 0.55,
+      Math.min(fitDistance * 1.50, sphericalTargetRef.current.radius)
     );
 
     // Smooth damping
@@ -597,7 +829,7 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
     camera.lookAt(0, 0, 0);
     camera.updateMatrixWorld();
 
-    // 3. Project 6 2D HTML pill labels and hide when on back of globe (dot(normal, cameraDir) < 0.15)
+    // 3. Project 6 2D HTML pill labels and hide when on rear hemisphere (dot(normal, camDir) < 0.15)
     camDir.copy(camera.position).normalize();
     for (let i = 0; i < markerVecs.length; i++) {
       const mv = markerVecs[i];
@@ -609,7 +841,6 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
         el.style.opacity = '0';
         el.style.pointerEvents = 'none';
       } else {
-        // Smooth opacity fade near horizon (0.15 -> 0.35)
         const alpha = Math.min(1, (dotVal - 0.15) / 0.2);
         projVec.copy(mv.pos).project(camera);
         const x = (projVec.x * 0.5 + 0.5) * size.width;
@@ -623,45 +854,76 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
 
   return (
     <group>
-      <ambientLight intensity={1.35} color="#ffffff" />
-      <directionalLight position={[4, 6, 5]} intensity={1.1} color="#ffffff" />
-      <directionalLight position={[-4, -2, -3]} intensity={0.45} color="#dbeafe" />
+      {/* Daylight Illumination with realistic sun angle and subtle atmospheric blue */}
+      <ambientLight intensity={0.65} color="#FFFFFF" />
+      <directionalLight position={[5, 4, 3]} intensity={1.15} color="#FFFFFF" />
+      <directionalLight position={[-5, -2, -3]} intensity={0.25} color="#93C5FD" />
 
-      {/* Ocean Sphere (#DCE6F5, roughness 0.85, metalness 0.02) */}
+      {/* Primary Earth Sphere with Day Map Texture */}
       <mesh
-        geometry={oceanGeo}
+        geometry={earthGeo}
         onClick={(e) => {
           e.stopPropagation();
           onSelectMarker(null);
         }}
+        onPointerMove={(e) => {
+          e.stopPropagation();
+          if (e.point) {
+            const { lat, lon } = vec3ToLatLon(e.point);
+            onHoverGeo(resolveGeoLocation(lat, lon));
+          }
+        }}
+        onPointerOut={() => {
+          onHoverGeo(null);
+        }}
       >
         <meshStandardMaterial
-          color="#DCE6F5"
-          roughness={0.85}
-          metalness={0.02}
+          map={textures.day || undefined}
+          bumpMap={textures.bump || undefined}
+          bumpScale={0.024}
+          roughnessMap={textures.water || undefined}
+          roughness={textures.day ? 0.42 : 0.85}
+          metalness={0.05}
+          color={textures.day ? '#FFFFFF' : '#DCE6F5'}
         />
       </mesh>
 
-      {/* Thin Back-Side Atmosphere Rim (scale 1.015, #BCD0F0 at 25% opacity) */}
+      {/* Cloud Layer (Moving slowly, transparent without bleaching) */}
+      {textures.clouds && (
+        <mesh ref={cloudMeshRef} geometry={cloudGeo}>
+          <meshStandardMaterial
+            map={textures.clouds}
+            transparent
+            opacity={0.15}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
+
+      {/* Soft Blue Atmospheric Rim */}
       <mesh geometry={rimGeo}>
         <meshBasicMaterial
-          color="#BCD0F0"
+          color="#93C5FD"
           transparent
-          opacity={0.25}
+          opacity={0.22}
           side={THREE.BackSide}
           depthWrite={false}
         />
       </mesh>
 
-      {/* Subtle 30-degree Latitude/Longitude Grid (#C8D5EA at 35% opacity) */}
+      {/* Subtle Graticule (faint latitude/longitude overlay) */}
       <lineSegments geometry={graticuleGeo}>
-        <lineBasicMaterial color="#C8D5EA" transparent opacity={0.35} />
+        <lineBasicMaterial
+          color="#94A3B8"
+          transparent
+          opacity={textures.day ? 0.12 : 0.35}
+        />
       </lineSegments>
 
-      {/* Dotted Continents (1 InstancedMesh draw call) */}
-      <DottedContinents />
+      {/* Procedural Dotted Continents active as fallback if day texture fails to load */}
+      {!textures.day && <DottedContinents />}
 
-      {/* 4 Hub-and-Spoke Connection Arcs with Bouncing Packets */}
+      {/* 4 Hub-and-Spoke Connection Arcs with Traveling Packets */}
       <ConnectionArcs3D reducedMotion={reducedMotion} />
 
       {/* 6 Country Markers + Expanding Rings */}
@@ -682,11 +944,19 @@ const DEFAULT_THETA = (DEFAULT_LON + 180) * (Math.PI / 180);
 
 export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   onInspectGraph,
+  className = '',
+  style,
 }) => {
   const [selectedMarker, setSelectedMarker] = useState<GlobeMarker | null>(null);
   const [webglSupported, setWebglSupported] = useState<boolean>(true);
   const [reducedMotion, setReducedMotion] = useState<boolean>(false);
   const [isVisible, setIsVisible] = useState<boolean>(true);
+  const [stageReady, setStageReady] = useState<boolean>(false);
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+  const [canvasReady, setCanvasReady] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -696,20 +966,98 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   const isDraggingRef = useRef<boolean>(false);
   const pointerDownPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const pointerPrevPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const velocityRef = useRef<{ theta: number; phi: number }>({ theta: 0, phi: 0 });
+  const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartRadiusRef = useRef<number | null>(null);
+  const dragDistanceRef = useRef<number>(0);
   const lastInteractionTimeRef = useRef<number>(0);
   const introDoneRef = useRef<boolean>(false);
+
+  const [hoverReadout, setHoverReadout] = useState<GeoHoverInfo | null>(null);
+  const lastHoverUpdateRef = useRef<number>(0);
+
+  const handleGlobeHover = useCallback((info: GeoHoverInfo | null) => {
+    const now = performance.now();
+    if (info === null) {
+      setHoverReadout(null);
+      return;
+    }
+    // Throttle UI state updates to ~35ms to preserve 60fps rendering
+    if (now - lastHoverUpdateRef.current > 35) {
+      lastHoverUpdateRef.current = now;
+      setHoverReadout(info);
+    }
+  }, []);
+
+  // Compute fit distance based on FOV=38 and current container aspect ratio
+  const fitDistance = useMemo(() => {
+    const fov = 38;
+    const vFovRad = (fov * Math.PI) / 360;
+    const aspect =
+      containerSize.width > 0 && containerSize.height > 0
+        ? containerSize.width / containerSize.height
+        : 1.5;
+    const hFovRad = Math.atan(Math.tan(vFovRad) * aspect);
+    const R_FIT = 1.08;
+    const MARGIN = 1.14;
+    const distV = (R_FIT * MARGIN) / Math.sin(vFovRad);
+    const distH = (R_FIT * MARGIN) / Math.sin(hFovRad);
+    return Math.max(distV, distH);
+  }, [containerSize.width, containerSize.height]);
 
   const sphericalTargetRef = useRef({
     theta: DEFAULT_THETA,
     phi: DEFAULT_PHI,
-    radius: 1.7,
+    radius: 3.6,
   });
   const sphericalCurrentRef = useRef({
     theta: DEFAULT_THETA,
     phi: DEFAULT_PHI,
-    radius: 1.7,
+    radius: 3.6,
   });
 
+  // Keep camera distance proportional on container resize without restarting intro
+  const prevFitRef = useRef<number>(fitDistance);
+  useEffect(() => {
+    if (prevFitRef.current !== fitDistance && prevFitRef.current > 0) {
+      const ratio = fitDistance / prevFitRef.current;
+      sphericalTargetRef.current.radius *= ratio;
+      sphericalCurrentRef.current.radius *= ratio;
+      prevFitRef.current = fitDistance;
+    }
+  }, [fitDistance]);
+
+  // Stage-readiness observer: wait for .stage-enter animationend (with 500ms fallback)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) {
+      setStageReady(true);
+      return;
+    }
+
+    const stageEl = el.closest('.stage-enter') as HTMLElement | null;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+    if (!stageEl) {
+      setStageReady(true);
+    } else {
+      const handleAnimEnd = () => {
+        setStageReady(true);
+      };
+      stageEl.addEventListener('animationend', handleAnimEnd, { once: true });
+      fallbackTimer = setTimeout(() => {
+        setStageReady(true);
+      }, 500);
+
+      return () => {
+        stageEl.removeEventListener('animationend', handleAnimEnd);
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+      };
+    }
+  }, []);
+
+  // WebGL support, reduced motion, viewport intersection, and ResizeObserver
   useEffect(() => {
     try {
       const canvas = document.createElement('canvas');
@@ -730,94 +1078,196 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
     );
     if (containerRef.current) io.observe(containerRef.current);
 
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && viewportRef.current) {
+      ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0) {
+            setContainerSize({ width: Math.round(width), height: Math.round(height) });
+          }
+        }
+      });
+      ro.observe(viewportRef.current);
+    }
+
     return () => {
       mq.removeEventListener('change', onMq);
       io.disconnect();
+      ro?.disconnect();
     };
   }, []);
 
-  // Wheel zoom listener (minDistance 1.5, maxDistance 4.5)
+  // Proportional exponential wheel zoom with boundary escape (prevents trapping page scroll)
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
       introDoneRef.current = true;
       lastInteractionTimeRef.current = performance.now();
-      sphericalTargetRef.current.radius = Math.max(
-        1.5,
-        Math.min(4.5, sphericalTargetRef.current.radius + e.deltaY * 0.0018)
-      );
+
+      const minR = fitDistance * 0.55;
+      const maxR = fitDistance * 1.50;
+      const currentR = sphericalTargetRef.current.radius;
+
+      // Allow natural document scroll when already at zoom limits
+      if (e.deltaY < 0 && currentR <= minR + 0.005) {
+        return;
+      }
+      if (e.deltaY > 0 && currentR >= maxR - 0.005) {
+        return;
+      }
+
+      e.preventDefault();
+      const zoomFactor = Math.exp(e.deltaY * 0.0012);
+      const nextR = currentR * zoomFactor;
+      sphericalTargetRef.current.radius = Math.max(minR, Math.min(maxR, nextR));
+      velocityRef.current = { theta: 0, phi: 0 };
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [fitDistance]);
 
-  const focusCountry = useCallback((marker: GlobeMarker | null) => {
-    introDoneRef.current = true;
-    lastInteractionTimeRef.current = performance.now();
-    setSelectedMarker(marker);
-    if (marker) {
-      const phi = (90 - marker.lat) * (Math.PI / 180);
-      const theta = (marker.lon + 180) * (Math.PI / 180);
-      sphericalTargetRef.current.phi = Math.max(0.4, Math.min(Math.PI - 0.4, phi));
-      sphericalTargetRef.current.theta = theta;
-      sphericalTargetRef.current.radius = Math.min(sphericalTargetRef.current.radius, 2.55);
-    }
-  }, []);
+  const focusCountry = useCallback(
+    (marker: GlobeMarker | null) => {
+      // Ignore click if was a drag operation (> 5px)
+      if (dragDistanceRef.current > 5) return;
+      introDoneRef.current = true;
+      lastInteractionTimeRef.current = performance.now();
+      velocityRef.current = { theta: 0, phi: 0 };
+      setSelectedMarker(marker);
+      if (marker) {
+        const phi = (90 - marker.lat) * (Math.PI / 180);
+        const theta = (marker.lon + 180) * (Math.PI / 180);
+        sphericalTargetRef.current.phi = Math.max(0.42, Math.min(Math.PI - 0.42, phi));
+        sphericalTargetRef.current.theta = theta;
+        sphericalTargetRef.current.radius = fitDistance * 0.78;
+      }
+    },
+    [fitDistance]
+  );
 
   const handleResetView = useCallback(() => {
     introDoneRef.current = true;
     lastInteractionTimeRef.current = performance.now();
+    velocityRef.current = { theta: 0, phi: 0 };
     setSelectedMarker(null);
     sphericalTargetRef.current.theta = DEFAULT_THETA;
     sphericalTargetRef.current.phi = DEFAULT_PHI;
-    sphericalTargetRef.current.radius = 3.2;
-  }, []);
+    sphericalTargetRef.current.radius = fitDistance;
+  }, [fitDistance]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    isDraggingRef.current = true;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
     introDoneRef.current = true;
     lastInteractionTimeRef.current = performance.now();
-    pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
-    pointerPrevPosRef.current = { x: e.clientX, y: e.clientY };
+    velocityRef.current = { theta: 0, phi: 0 };
+
+    if (activePointersRef.current.size === 1) {
+      isDraggingRef.current = true;
+      dragDistanceRef.current = 0;
+      pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+      pointerPrevPosRef.current = { x: e.clientX, y: e.clientY };
+    } else if (activePointersRef.current.size === 2) {
+      isDraggingRef.current = false;
+      const pts = Array.from(activePointersRef.current.values());
+      pinchStartDistRef.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      pinchStartRadiusRef.current = sphericalTargetRef.current.radius;
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Touch pinch-to-zoom
+    if (
+      activePointersRef.current.size === 2 &&
+      pinchStartDistRef.current &&
+      pinchStartRadiusRef.current
+    ) {
+      const pts = Array.from(activePointersRef.current.values());
+      const currentDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (currentDist > 8 && pinchStartDistRef.current > 8) {
+        const scale = pinchStartDistRef.current / currentDist;
+        const minR = fitDistance * 0.55;
+        const maxR = fitDistance * 1.50;
+        sphericalTargetRef.current.radius = Math.max(
+          minR,
+          Math.min(maxR, pinchStartRadiusRef.current * scale)
+        );
+        lastInteractionTimeRef.current = performance.now();
+      }
+      return;
+    }
+
     if (!isDraggingRef.current) return;
+
     const dx = e.clientX - pointerPrevPosRef.current.x;
     const dy = e.clientY - pointerPrevPosRef.current.y;
     pointerPrevPosRef.current = { x: e.clientX, y: e.clientY };
     lastInteractionTimeRef.current = performance.now();
 
-    sphericalTargetRef.current.theta += dx * 0.0065;
+    dragDistanceRef.current += Math.hypot(dx, dy);
+
+    // Direct cursor tracking:
+    // Dragging right (dx > 0) turns the front globe surface right (so theta decreases).
+    // Dragging down (dy > 0) tilts the north pole down towards user (so phi decreases).
+    // Scale sensitivity by current zoom distance for consistent pixel-to-surface velocity
+    const currentDist = sphericalCurrentRef.current.radius;
+    const zoomRatio = currentDist / fitDistance;
+    const sensitivity = 0.0052 * Math.max(0.6, Math.min(1.35, zoomRatio));
+
+    const dTheta = -dx * sensitivity;
+    const dPhi = -dy * sensitivity;
+
+    sphericalTargetRef.current.theta += dTheta;
     sphericalTargetRef.current.phi = Math.max(
-      0.35,
-      Math.min(Math.PI - 0.35, sphericalTargetRef.current.phi - dy * 0.0065)
+      0.42,
+      Math.min(Math.PI - 0.42, sphericalTargetRef.current.phi + dPhi)
     );
+
+    // Record velocity for release inertia (decay applied in GlobeScene useFrame)
+    velocityRef.current.theta = dTheta * 0.65;
+    velocityRef.current.phi = dPhi * 0.65;
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
-    lastInteractionTimeRef.current = performance.now();
-    const movedDist = Math.hypot(
-      e.clientX - pointerDownPosRef.current.x,
-      e.clientY - pointerDownPosRef.current.y
-    );
-    // Clicking empty space without dragging clears selection
-    if (movedDist < 4 && (e.target as HTMLElement).tagName === 'CANVAS') {
-      // Handled by sphere/marker click
+    activePointersRef.current.delete(e.pointerId);
+    try {
+      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    } catch {
+      // Ignore capture release error
+    }
+
+    if (activePointersRef.current.size === 0) {
+      isDraggingRef.current = false;
+      pinchStartDistRef.current = null;
+      pinchStartRadiusRef.current = null;
+      lastInteractionTimeRef.current = performance.now();
+    } else if (activePointersRef.current.size === 1) {
+      // Single pointer remaining after pinch: re-anchor to avoid jump
+      const remaining = activePointersRef.current.values().next().value;
+      if (remaining) {
+        pointerPrevPosRef.current = { x: remaining.x, y: remaining.y };
+        isDraggingRef.current = true;
+      }
     }
   };
+
+  const isReady = stageReady && containerSize.width > 0 && containerSize.height > 0 && isVisible;
 
   return (
     <div
       ref={containerRef}
-      className="cf-card p-5 flex flex-col justify-between min-w-0"
+      className={`cf-card p-5 flex flex-col justify-between min-w-0 ${className}`.trim()}
+      style={style}
     >
       {/* Card Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-[#2563EB] shrink-0" />
@@ -847,7 +1297,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
         </div>
       </div>
 
-      {/* Light Sky-Slate 3D Globe Stage (#F6F8FC -> #EAF0FA, height ~520px, 20px radius) */}
+      {/* 3D Globe Stage with touch-action pan-y, porcelain skeleton, and Canvas */}
       <div
         ref={viewportRef}
         onPointerEnter={() => {
@@ -861,34 +1311,60 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        className="relative w-full h-[520px] rounded-[20px] overflow-hidden border border-[#E2E8F1] select-none cursor-grab active:cursor-grabbing"
+        onPointerCancel={handlePointerUp}
         style={{
-          background: 'linear-gradient(180deg, #F6F8FC 0%, #EAF0FA 100%)',
+          touchAction: 'pan-y',
+          background: 'linear-gradient(180deg, #F8FAFD 0%, #EBF1FA 100%)',
         }}
+        className="relative w-full flex-1 min-h-[380px] rounded-[20px] overflow-hidden border border-[#E2E8F1] select-none cursor-grab active:cursor-grabbing"
       >
-        {webglSupported ? (
-          <Canvas
-            camera={{ position: [0, 0, 1.7], fov: 38 }}
-            dpr={[1, 1.75]}
-            frameloop={isVisible ? 'always' : 'never'}
-            gl={{ antialias: true, alpha: true }}
-            onPointerMissed={() => handleResetView()}
-            className="w-full h-full"
+        {/* Porcelain skeleton shown while mounting and sizing */}
+        {(!isReady || !canvasReady) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
+            <div className="relative w-48 h-48 sm:w-64 sm:h-64 rounded-full bg-white/70 border border-slate-200/80 shadow-[0_8px_32px_-8px_rgba(37,99,235,0.12)] flex items-center justify-center">
+              <div className="w-36 h-36 sm:w-48 sm:h-48 rounded-full border border-dashed border-blue-200/70 animate-spin [animation-duration:18s]" />
+              <div className="absolute w-2.5 h-2.5 rounded-full bg-blue-500/40 animate-ping" />
+            </div>
+            <span className="text-xs font-medium text-slate-400 mt-4 tracking-wide">
+              Loading satellite globe telemetry…
+            </span>
+          </div>
+        )}
+
+        {isReady && webglSupported && (
+          <div
+            className="w-full h-full transition-opacity duration-350"
+            style={{ opacity: canvasReady ? 1 : 0 }}
           >
-            <GlobeScene
-              selectedMarker={selectedMarker}
-              onSelectMarker={focusCountry}
-              labelElsRef={labelElsRef}
-              isHoveringRef={isHoveringRef}
-              isDraggingRef={isDraggingRef}
-              lastInteractionTimeRef={lastInteractionTimeRef}
-              sphericalTargetRef={sphericalTargetRef}
-              sphericalCurrentRef={sphericalCurrentRef}
-              introDoneRef={introDoneRef}
-              reducedMotion={reducedMotion}
-            />
-          </Canvas>
-        ) : (
+            <Canvas
+              camera={{ position: [0, 0, fitDistance * 1.08], fov: 38 }}
+              dpr={[1, 1.75]}
+              frameloop={isVisible ? 'always' : 'never'}
+              gl={{ antialias: true, alpha: true }}
+              onPointerMissed={() => handleResetView()}
+              className="w-full h-full"
+            >
+              <GlobeScene
+                selectedMarker={selectedMarker}
+                onSelectMarker={focusCountry}
+                labelElsRef={labelElsRef}
+                isHoveringRef={isHoveringRef}
+                isDraggingRef={isDraggingRef}
+                lastInteractionTimeRef={lastInteractionTimeRef}
+                sphericalTargetRef={sphericalTargetRef}
+                sphericalCurrentRef={sphericalCurrentRef}
+                velocityRef={velocityRef}
+                introDoneRef={introDoneRef}
+                reducedMotion={reducedMotion}
+                onFirstFrameReady={() => setCanvasReady(true)}
+                onHoverGeo={handleGlobeHover}
+                fitDistance={fitDistance}
+              />
+            </Canvas>
+          </div>
+        )}
+
+        {!webglSupported && (
           /* Fallback if WebGL is unavailable */
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
             <p className="text-sm font-semibold text-[#0F1B33] mb-3">
@@ -957,6 +1433,33 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
             })}
           </div>
         )}
+
+        {/* Live Geographic Hover Readout Pill */}
+        <div className="absolute top-3.5 left-3.5 z-10 pointer-events-none transition-all duration-150">
+          {hoverReadout ? (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/92 backdrop-blur-md border border-[#E2E8F1] shadow-sm text-xs font-medium text-[#0F1B33]">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{
+                  backgroundColor:
+                    hoverReadout.markerColor || (hoverReadout.isLand ? '#10B981' : '#0EA5E9'),
+                }}
+              />
+              <span className="font-semibold text-[#0F1B33]">{hoverReadout.label}</span>
+              <span className="font-mono text-[11px] text-[#5B6B85] tabular-nums">
+                {formatLatLon(hoverReadout.lat, hoverReadout.lon)}
+              </span>
+              <span className="hidden md:inline text-[11px] text-[#64748B] border-l border-slate-200 pl-2">
+                {hoverReadout.detail}
+              </span>
+            </div>
+          ) : (
+            <div className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/75 backdrop-blur-sm border border-[#E2E8F1]/80 text-[11px] text-[#64748B]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2563EB]/60" />
+              <span>Hover earth for live telemetry</span>
+            </div>
+          )}
+        </div>
 
         {/* Single "Reset view" button in the top-right of the globe */}
         <button
