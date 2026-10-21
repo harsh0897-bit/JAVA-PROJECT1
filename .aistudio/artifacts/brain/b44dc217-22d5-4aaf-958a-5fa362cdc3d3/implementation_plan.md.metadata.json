@@ -1,0 +1,6 @@
+{
+  "summary":  "Updated implementation plan incorporating the five final fixes: (1) Globe arcs derived strictly from each case's own data in a non-crossing hub-and-spoke pattern from the control-server country, (2) Stage 6 flow diagram nodes/labels derived from case data in plain words + 4 step cards with 'Photo edited' badge (removing 5-event strip and 2x2 key facts grid), (3) Stage 1 2x2 figures using only existing data fields, (4) Globe intro gate using intersectionRect.height >= 0.8 * min(cardHeight, viewportHeight) && pageReady with 2.5s fallback at >=40% visibility, and (5) Greedy graph-colouring via topojson.neighbors so adjacent countries never share a fill, plain opaque materials for inner diamond/rings, and 'fingerprint' terminology throughout UI text.",
+  "updatedAt":  "2026-10-21T11:14:40.490148334Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
