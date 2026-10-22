@@ -113,6 +113,45 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
     };
   }, []);
 
+  // Section F: Landing scroll positioning on initial load (honor #hash with navbar offset, else top)
+  useEffect(() => {
+    let userInteracted = false;
+    const onUserAction = () => {
+      userInteracted = true;
+    };
+    window.addEventListener('wheel', onUserAction, { passive: true, once: true });
+    window.addEventListener('touchmove', onUserAction, { passive: true, once: true });
+    window.addEventListener('keydown', onUserAction, { passive: true, once: true });
+
+    const timer = setTimeout(() => {
+      if (userInteracted) return;
+      const hash = window.location.hash;
+      if (hash && hash.length > 1) {
+        try {
+          const target = document.querySelector(hash);
+          if (target) {
+            const navOffset = 76;
+            const top = target.getBoundingClientRect().top + window.scrollY - navOffset;
+            window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+            return;
+          }
+        } catch {
+          // invalid selector fallback
+        }
+      }
+      if (window.scrollY > 0 && !userInteracted) {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    }, 50);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('wheel', onUserAction);
+      window.removeEventListener('touchmove', onUserAction);
+      window.removeEventListener('keydown', onUserAction);
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     const sectionIds = ['workflow', 'capabilities', 'cases', 'roles'];

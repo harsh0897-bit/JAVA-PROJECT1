@@ -461,14 +461,52 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
             </div>
           </div>
 
-          {/* Section 1: What Happened (Executive Summary) */}
+          {/* Section 1: Case Summary */}
           <div className="space-y-3 min-w-0">
-            <h3 className="text-sm font-bold text-slate-900">
-              1. What Happened
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">
+                1. Case Summary
+              </h3>
+              <span className="text-xs font-mono text-slate-500">
+                Ref: {reportModel.metadata.caseNumber}
+              </span>
+            </div>
             <p className="text-xs sm:text-sm text-slate-700 leading-relaxed bg-[#F6F8FC] p-4 rounded-xl border border-slate-200/80">
               {reportModel.summary.whatHappened}
             </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Incident Type</span>
+                <span className="font-semibold text-slate-900 truncate block">
+                  {reportModel.metrics.incidentType}
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Jurisdiction</span>
+                <span className="font-semibold text-slate-900 truncate block">
+                  {reportModel.metadata.jurisdictionCountry}
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Lead Unit</span>
+                <span className="font-semibold text-slate-900 truncate block">
+                  {reportModel.metadata.leadUnit}
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Victim</span>
+                <span className="font-semibold text-slate-900 truncate block">
+                  {reportModel.metrics.victimName}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Key Findings */}
+          <div className="space-y-3 min-w-0">
+            <h3 className="text-sm font-bold text-slate-900">
+              2. Key Findings
+            </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
               <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
                 <span className="text-slate-400 text-[11px] block">Risk Score</span>
@@ -495,18 +533,24 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
                 </span>
               </div>
             </div>
+            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-3.5 space-y-1.5 text-xs">
+              <div className="font-bold text-slate-900">
+                Principal Risk Finding: {reportModel.summary.principalRisk}
+              </div>
+              <p className="text-slate-600 leading-relaxed">
+                {reportModel.summary.supportedConclusion}
+              </p>
+            </div>
           </div>
 
-          {/* Section 2: Key Steps in Order (Chronological Timeline) */}
+          {/* Section 3: Timeline */}
           <div className="space-y-3 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">
-                2. Key Steps in Order ({reportModel.timeline.length})
+                3. Timeline ({reportModel.timeline.length} Steps)
               </h3>
               <span className="text-xs font-mono text-slate-500 tabular-nums">
-                {reportModel.financialSummary.currencySubtotals
-                  .map((s) => `${s.currency}: ${s.formattedSubtotal}`)
-                  .join(' • ') || reportModel.metrics.recordedCaseLossUsd}
+                Chronological Sequence
               </span>
             </div>
 
@@ -545,11 +589,11 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
             )}
           </div>
 
-          {/* Section 3: Evidence Files Included */}
+          {/* Section 4: Evidence */}
           <div className="space-y-3 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">
-                3. Evidence Files Included ({reportModel.evidence.length})
+                4. Evidence ({reportModel.evidence.length} Files)
               </h3>
               <span className="text-xs font-semibold text-emerald-700 tabular-nums">
                 {reportModel.integrity.verifiedIntactCount} /{' '}
@@ -618,57 +662,99 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
             )}
           </div>
 
-          {/* Section 4: Entity & Graph Summary + Key Findings */}
+          {/* Section 5: Money and Connections */}
           <div className="space-y-3 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">
-                4. Correlated Entities &amp; Key Findings
+                5. Money and Connections
               </h3>
               <span className="text-xs font-mono text-slate-500 tabular-nums">
-                {reportModel.entities.length} entities •{' '}
-                {reportModel.relationships.length} relationships
+                Headline: {reportModel.financialSummary.recordedCaseHeadlineExposure}
               </span>
             </div>
 
-            {reportModel.entities.length > 0 && (
-              <div className="flex flex-wrap gap-2 font-mono text-xs">
-                {reportModel.entities.slice(0, 6).map((ent) => (
-                  <span
-                    key={ent.id}
-                    className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all"
+            {reportModel.financialSummary.currencySubtotals.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                {reportModel.financialSummary.currencySubtotals.map((sub) => (
+                  <div
+                    key={sub.currency}
+                    className="bg-[#F6F8FC] px-3.5 py-2.5 rounded-xl border border-slate-200/80"
                   >
-                    {ent.plainCategory}: <strong>{ent.displayLabel}</strong> (
-                    {ent.confidencePct})
-                  </span>
+                    <span className="text-[11px] font-semibold text-slate-500 block">
+                      {sub.currency} Subtotal ({sub.recordCount} movement{sub.recordCount === 1 ? '' : 's'})
+                    </span>
+                    <span className="font-mono font-bold text-slate-900 text-sm tabular-nums">
+                      {sub.formattedSubtotal}
+                    </span>
+                    {sub.unresolvedDuplicateCount > 0 && (
+                      <span className="text-[10px] text-amber-700 block mt-0.5">
+                        {sub.unresolvedDuplicateCount} unconfirmed duplicate(s)
+                      </span>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
 
-            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-3.5 space-y-1.5 text-xs">
-              <div className="font-bold text-slate-800">
-                Principal Risk: {reportModel.summary.principalRisk}
+            {reportModel.entities.length > 0 && (
+              <div className="flex flex-wrap gap-2 font-mono text-xs pt-1">
+                {reportModel.entities.slice(0, 8).map((ent) => (
+                  <span
+                    key={ent.id}
+                    className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all text-[11px]"
+                  >
+                    {ent.plainCategory}: <strong>{ent.displayLabel}</strong> ({ent.confidencePct})
+                  </span>
+                ))}
               </div>
-              <ul className="list-disc pl-4 space-y-1 text-slate-600">
-                {reportModel.warnings.map((w) => (
-                  <li key={w.id} className="leading-snug break-words">
-                    <strong>{w.sourceRef} ({w.category}):</strong> {w.whatWasFound}
-                  </li>
-                ))}
-                {reportModel.conclusion.nextReviewPoints.map((pt, idx) => (
-                  <li key={`pt-${idx}`} className="leading-snug break-words">
-                    {pt}
-                  </li>
-                ))}
-              </ul>
+            )}
+          </div>
+
+          {/* Section 6: Warnings and Next Steps */}
+          <div className="space-y-3 min-w-0">
+            <h3 className="text-sm font-bold text-slate-900">
+              6. Warnings and Next Steps
+            </h3>
+            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-3.5 space-y-2 text-xs">
+              {reportModel.warnings.length > 0 ? (
+                <div className="space-y-1.5">
+                  <div className="font-bold text-amber-800">
+                    Documented Warnings &amp; Metadata Anomalies ({reportModel.warnings.length})
+                  </div>
+                  <ul className="list-disc pl-4 space-y-1 text-slate-700">
+                    {reportModel.warnings.map((w) => (
+                      <li key={w.id} className="leading-snug break-words">
+                        <strong>{w.sourceRef} ({w.category}):</strong> {w.whatWasFound}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="text-slate-600">
+                  Zero undisclosed anomalies or integrity warnings detected across case evidence.
+                </div>
+              )}
+              <div className="pt-2 border-t border-slate-200/70 space-y-1">
+                <div className="font-bold text-slate-800">
+                  Recommended Next Steps &amp; Preservation Requests
+                </div>
+                <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                  {reportModel.conclusion.nextReviewPoints.map((pt, idx) => (
+                    <li key={`pt-${idx}`} className="leading-snug break-words">
+                      {pt}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
 
-          {/* Section 5: Investigator Sign-Off */}
+          {/* Section 7: Technical Appendix */}
           <div className="space-y-3 min-w-0">
             <h3 className="text-sm font-bold text-slate-900">
-              5. Investigator Sign-Off &amp; Chain-of-Custody Attestation
+              7. Technical Appendix
             </h3>
-            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-5 space-y-3 text-xs">
+            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-4 space-y-3 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-3">
                 <div className="flex items-center gap-2">
                   <FileSignature className="w-5 h-5 text-emerald-600" />
@@ -683,16 +769,22 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
               <p className="text-slate-600 leading-relaxed">
                 {reportModel.conclusion.summaryStatement}
               </p>
-              <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 font-mono">
-                <span className="break-all">
-                  Report Seal:{' '}
-                  <strong className="text-emerald-700 select-all">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] font-mono pt-1">
+                <div>
+                  <span className="text-slate-400 block">Report Merkle Seal:</span>
+                  <span className="text-emerald-700 font-bold break-all select-all">
                     {reportModel.integrity.headMerkleHash}
-                  </strong>
-                </span>
-                <span className="text-emerald-700 font-bold shrink-0">
-                  {reportModel.integrity.custodyEntries.length} custody entries ✓
-                </span>
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Custody &amp; Verification:</span>
+                  <span className="text-slate-700 font-bold">
+                    {reportModel.integrity.custodyEntries.length} verified custody events · {reportModel.integrity.verifiedIntactCount}/{reportModel.integrity.totalEvidenceCount} SHA-256 &amp; BLAKE3 Intact
+                  </span>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-200/70 text-[11px] text-slate-500 font-mono">
+                Engine: Java 21 LTS Virtual Threads · JGraphT PageRank Centrality · Dual-Digest SHA-256/BLAKE3
               </div>
             </div>
           </div>

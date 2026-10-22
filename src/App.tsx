@@ -130,13 +130,34 @@ export function App() {
     };
   }, [appStage, isAuthenticated]);
 
-  // F2: Scroll the workspace scroll container to the top of the new stage (below sticky header) on stage change
+  // F: Scroll the element that actually owns scrolling to the top of the destination stage (instant, not smooth)
   const prevTabRef = useRef<TabType>(activeTab);
   useEffect(() => {
     if (prevTabRef.current !== activeTab) {
       prevTabRef.current = activeTab;
-      if (appStage === 'WORKSPACE' && isAuthenticated && window.scrollY > 0) {
-        window.scrollTo({ top: 0, behavior: 'auto' });
+      if (appStage === 'WORKSPACE' && isAuthenticated) {
+        const panel = document.querySelector('[role="tabpanel"]') as HTMLElement | null;
+        let owner: HTMLElement | Window = window;
+        let curr = panel?.parentElement;
+        while (curr && curr !== document.body && curr !== document.documentElement) {
+          const style = window.getComputedStyle(curr);
+          const overflowY = style.overflowY;
+          if (
+            (overflowY === 'auto' || overflowY === 'scroll') &&
+            curr.scrollHeight > curr.clientHeight
+          ) {
+            owner = curr;
+            break;
+          }
+          curr = curr.parentElement;
+        }
+        if (owner instanceof Window) {
+          if (window.scrollY > 0) {
+            window.scrollTo({ top: 0, behavior: 'auto' });
+          }
+        } else {
+          owner.scrollTop = 0;
+        }
       }
     }
   }, [activeTab, appStage, isAuthenticated]);

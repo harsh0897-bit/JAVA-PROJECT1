@@ -7,6 +7,10 @@ import {
   EvidenceItem,
 } from '../types';
 import { copyToClipboardSafe } from '../lib/clipboard';
+import {
+  isPhysicalCtrlOrMetaPressed,
+  scrollWorkspaceBy,
+} from '../lib/physicalKeyTracker';
 import { Popover } from './layout/Popover';
 import {
   RotateCcw,
@@ -1141,15 +1145,23 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     const onWheel = (e: WheelEvent) => {
       if (draggingNodeIdRef.current) return;
 
-      // Normalize deltaMode (0 = pixels, 1 = lines, 2 = pages) and trackpad pinch (ctrlKey)
+      // Normalize deltaMode (0 = pixels, 1 = lines, 2 = pages)
       let dy = e.deltaY;
       if (e.deltaMode === 1) dy *= 16;
       else if (e.deltaMode === 2) dy *= 320;
       if (dy === 0) return;
 
+      // When Ctrl is held (or physical Ctrl/Meta), do not zoom graph, allow page to scroll naturally
+      if (e.ctrlKey || isPhysicalCtrlOrMetaPressed()) {
+        return;
+      }
+
+      // D2: Trackpad pinch (e.ctrlKey === true without physical modifier key)
+      const isPinch = e.ctrlKey && !physicalKey;
+
       const currentZoom = zoomRef.current;
 
-      // Let wheel event pass through to scroll the page when already at min/max zoom limits
+      // D4: Pass through to scroll page when already at min/max zoom limits
       if (dy < 0 && currentZoom >= MAX_ZOOM - 0.001) {
         return;
       }
@@ -1167,7 +1179,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
       const cx = SVG_W / 2;
       const cy = SVG_H / 2;
 
-      const sensitivity = e.ctrlKey ? 0.0055 : 0.0015;
+      const sensitivity = isPinch ? 0.0055 : 0.0015;
       const clampedDy = Math.max(-160, Math.min(160, dy));
       const zoomFactor = Math.exp(-clampedDy * sensitivity);
       const newZoom = Math.max(

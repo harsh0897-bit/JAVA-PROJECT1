@@ -601,6 +601,8 @@ const PrismScene: React.FC<PrismSceneProps> = ({
       <ambientLight intensity={0.85} color="#ffffff" />
       <directionalLight position={[4, 8, 4]} intensity={1.8} color="#ffffff" />
       <directionalLight position={[-4, -3, -4]} intensity={0.8} color="#93c5fd" />
+      {/* E: Bottom-up cool light at ~20% of key light intensity (0.36), no shadows */}
+      <directionalLight position={[0, -4, 1.5]} intensity={0.36} color="#4db8ff" castShadow={false} />
 
       <group ref={crystalRotGroupRef} position={[0, 0.08, 0]} scale={0.82}>
         <InternalCore reducedMotion={reducedMotion} />
@@ -934,11 +936,12 @@ export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`cf-card relative rounded-[20px] overflow-hidden flex flex-col justify-between text-slate-900 bg-white border border-slate-200/80 ${className}`.trim()}
+      className={`cf-card relative rounded-[20px] overflow-hidden flex flex-col justify-between text-slate-900 bg-white ${className}`.trim()}
       style={{
         minHeight: '460px',
+        border: '1px solid rgba(120,170,255,0.35)',
         boxShadow:
-          '0 1px 2px rgba(15,23,42,0.06), 0 12px 28px -10px rgba(37,99,235,0.12), inset 0 1px 0 rgba(255,255,255,0.92)',
+          '0 14px 34px -14px rgba(25,70,150,0.30), inset 0 1px 0 rgba(255,255,255,0.65)',
       }}
     >
       {/* E1(c): Subtle top-edge inner highlight */}

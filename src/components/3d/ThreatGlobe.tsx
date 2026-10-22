@@ -10,6 +10,10 @@ import {
   ForensicCaseSummary,
   EntityRelationship,
 } from '../../types';
+import {
+  isPhysicalCtrlOrMetaPressed,
+  scrollWorkspaceBy,
+} from '../../lib/physicalKeyTracker';
 
 export interface ThreatGlobeProps {
   activeCase?: ForensicCaseSummary;
@@ -1243,13 +1247,22 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   }, []);
 
   // Proportional exponential wheel zoom: ONLY active when deliberately engaged (focus/click)
-  // so normal document vertical scroll is NEVER swallowed.
+  // Section D: Wheel & trackpad pinch shortcut policy
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (!isEngagedRef.current) {
-        return; // Allow page to scroll naturally!
+      // When Ctrl is held (or physical Ctrl/Meta), do not zoom globe, allow page to scroll naturally
+      if (e.ctrlKey || isPhysicalCtrlOrMetaPressed()) {
+        return;
+      }
+
+      // D2: Trackpad pinch (e.ctrlKey === true without physical modifier key).
+      // Prevent whole browser page zoom while zooming globe canvas.
+      const isPinch = e.ctrlKey && !physicalKey;
+
+      if (!isEngagedRef.current && !isPinch) {
+        return; // Allow page to scroll naturally if not engaged and not pinching
       }
 
       introDoneRef.current = true;
@@ -1259,7 +1272,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
       const maxR = fitDistance * 1.50;
       const currentR = sphericalTargetRef.current.radius;
 
-      // Allow natural document scroll when already at zoom limits
+      // D4: At zoom limits, do not trap wheel; pass remaining scroll delta to document
       if (e.deltaY < 0 && currentR <= minR + 0.005) {
         return;
       }
@@ -1268,7 +1281,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
       }
 
       e.preventDefault();
-      const zoomFactor = Math.exp(e.deltaY * 0.0012);
+      const zoomFactor = Math.exp(e.deltaY * (isPinch ? 0.006 : 0.0012));
       const nextR = currentR * zoomFactor;
       sphericalTargetRef.current.radius = Math.max(minR, Math.min(maxR, nextR));
       velocityRef.current = { theta: 0, phi: 0 };

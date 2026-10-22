@@ -62,11 +62,9 @@ interface NewCaseWizardModalProps {
 
 const WIZARD_STEPS = [
   { id: 1, label: 'Case Details', icon: FolderPlus },
-  { id: 2, label: 'Entities & Accounts', icon: Users },
-  { id: 3, label: 'Financial Movements', icon: DollarSign },
-  { id: 4, label: 'Timeline Events', icon: Clock },
-  { id: 5, label: 'Evidence Files', icon: FileText },
-  { id: 6, label: 'Graph Links', icon: Network },
+  { id: 2, label: 'People & Accounts', icon: Users },
+  { id: 3, label: 'Activity', icon: Clock },
+  { id: 4, label: 'Evidence & Connections', icon: Network },
 ] as const;
 
 const COUNTRIES = [
@@ -348,6 +346,10 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
   const [relType, setRelType] = useState<string>('TRANSFERRED_TO');
   const [relLabel, setRelLabel] = useState<string>('');
 
+  // 4-step consolidated activity & evidence tabs
+  const [activityTab, setActivityTab] = useState<'transfers' | 'timeline'>('transfers');
+  const [evidenceTab, setEvidenceTab] = useState<'files' | 'links'>('files');
+
   if (!isOpen) return null;
 
   const validateStep1 = (): string | null => {
@@ -374,6 +376,8 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
     return null;
   };
 
+  const isStep1Valid = Boolean(title.trim() && caseNumber.trim() && !validateStep1());
+
   const handleNextStep = () => {
     setErrorMsg(null);
     if (step === 1) {
@@ -383,7 +387,12 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
         return;
       }
     }
-    setStep((prev) => Math.min(6, prev + 1));
+    setStep((prev) => Math.min(4, prev + 1));
+  };
+
+  const handleSkip = () => {
+    setErrorMsg(null);
+    setStep((prev) => Math.min(4, prev + 1));
   };
 
   const handlePrevStep = () => {
@@ -701,7 +710,7 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
                   : 'Create Forensic Investigation Case'}
               </h2>
               <p className="text-xs text-slate-500 truncate">
-                Structured 6-step case builder — propagates directly to Overview, Evidence, Graph, Timeline, Ledger &amp; Report
+                Structured 4-step case builder — propagates directly to Overview, Evidence, Graph, Timeline, Ledger &amp; Report
               </p>
             </div>
           </div>
@@ -1133,10 +1142,42 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
 
           {step === 3 && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
-                <div className="text-xs font-bold text-slate-800">
-                  Add Financial Movement (Auto-generates TRANSFERRED_TO graph link &amp; feeds Section 6 Currency Subtotals)
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActivityTab('transfers')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition ${
+                      activityTab === 'transfers'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    Money Movements ({transactions.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivityTab('timeline')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition ${
+                      activityTab === 'timeline'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    Timeline Events ({timeline.length})
+                  </button>
                 </div>
+                <span className="text-[11px] text-slate-500 hidden sm:inline">
+                  Step 3 of 4 · Money flows &amp; chronological events
+                </span>
+              </div>
+
+              {activityTab === 'transfers' ? (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                    <div className="text-xs font-bold text-slate-800">
+                      Add Financial Movement (Auto-generates TRANSFERRED_TO graph link &amp; feeds Section 6 Currency Subtotals)
+                    </div>
 
                 {entities.length < 2 ? (
                   <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -1306,9 +1347,7 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
                 </div>
               )}
             </div>
-          )}
-
-          {step === 4 && (
+          ) : (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1494,9 +1533,43 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
               )}
             </div>
           )}
+        </div>
+      )}
 
-          {step === 5 && (
+          {step === 4 && (
             <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEvidenceTab('files')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition ${
+                      evidenceTab === 'files'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    Evidence Artifacts ({evidence.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEvidenceTab('links')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition ${
+                      evidenceTab === 'links'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    Graph Connections ({relationships.length})
+                  </button>
+                </div>
+                <span className="text-[11px] text-slate-500 hidden sm:inline">
+                  Step 4 of 4 · Artifact sealing &amp; topology links
+                </span>
+              </div>
+
+              {evidenceTab === 'files' ? (
+                <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-slate-800">
@@ -1632,9 +1705,7 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
                 </div>
               )}
             </div>
-          )}
-
-          {step === 6 && (
+          ) : (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
                 <div className="text-xs font-bold text-slate-800">
@@ -1754,6 +1825,8 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
             </div>
           )}
         </div>
+      )}
+    </div>
 
         {/* Footer Actions */}
         <div className="px-6 py-4 border-t border-slate-200/80 bg-slate-50/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -1806,7 +1879,17 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
               </button>
             )}
 
-            {step < 6 ? (
+            {step > 1 && step < 4 && (
+              <button
+                type="button"
+                onClick={handleSkip}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-800 transition cursor-pointer"
+              >
+                Skip for now
+              </button>
+            )}
+
+            {step < 4 ? (
               <button
                 type="button"
                 onClick={handleNextStep}
@@ -1819,9 +1902,10 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
 
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || !isStep1Valid}
               onClick={handleFinalSubmit}
-              className="cf-btn-blue px-5 py-2.5 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              title={!isStep1Valid ? 'Enter a Case Title and Case Number in Step 1 to create the case' : undefined}
+              className="cf-btn-blue px-5 py-2.5 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>
@@ -1829,7 +1913,7 @@ export const NewCaseWizardModal: React.FC<NewCaseWizardModalProps> = ({
                   ? 'Saving Case...'
                   : isEdit
                   ? 'Save Case Updates'
-                  : 'Create Case & Open Overview'}
+                  : 'Create Case & Open Workspace'}
               </span>
             </button>
           </div>

@@ -126,6 +126,8 @@ export interface ForensicReportModel {
     dataSourceClassification: string;
     dataSourceNote: string;
     preparedBy: string;
+    jurisdictionCountry: string;
+    leadUnit: string;
     nonLatinSubstitutionsApplied: number;
   };
   summary: {
@@ -958,6 +960,8 @@ export function buildReportModel(state: ReportInputState): ForensicReportModel {
         state.currentUser?.fullName ||
         c?.leadInvestigatorName ||
         'Not recorded',
+      jurisdictionCountry: c?.jurisdictionCountry || 'India',
+      leadUnit: c?.leadUnit || 'Financial Crimes & Digital Forensics Unit',
       nonLatinSubstitutionsApplied: 0,
     },
     summary: {
@@ -1073,28 +1077,30 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
   lines.push(`> ${model.metadata.dataSourceNote}`);
   lines.push('');
 
-  // 2. Executive Summary
-  lines.push('## 1. Executive Summary');
+  // 1. Case Summary
+  lines.push('## 1. Case Summary');
+  lines.push(`- **Case Number / ID:** ${model.metrics.caseNumber} (${model.metadata.caseId})`);
+  lines.push(`- **Incident Type:** ${model.metrics.incidentType}`);
+  lines.push(`- **Jurisdiction:** ${model.metadata.jurisdictionCountry}`);
+  lines.push(`- **Lead Unit:** ${model.metadata.leadUnit}`);
+  lines.push(`- **Lead Investigator:** ${model.metrics.leadInvestigator}`);
+  lines.push(`- **Victim:** ${model.metrics.victimName}`);
   lines.push(`- **What Happened:** ${model.summary.whatHappened}`);
+  lines.push('');
+
+  // 2. Key Findings
+  lines.push('## 2. Key Findings');
+  lines.push(`- **Severity & Risk Score:** ${model.metrics.severity} (${model.metrics.riskScore})`);
   lines.push(`- **Principal Risk:** ${model.summary.principalRisk}`);
   lines.push(`- **Known Exposure:** ${model.summary.knownExposure}`);
   lines.push(`- **Supported Conclusion:** ${model.summary.supportedConclusion}`);
-  lines.push('');
-
-  // 3. Case Overview & Key Figures
-  lines.push('## 2. Case Overview & Key Figures');
-  lines.push(`- **Incident Type:** ${model.metrics.incidentType}`);
-  lines.push(`- **Severity & Risk Score:** ${model.metrics.severity} (${model.metrics.riskScore})`);
-  lines.push(`- **Victim:** ${model.metrics.victimName}`);
-  lines.push(`- **Lead Investigator:** ${model.metrics.leadInvestigator}`);
-  lines.push(`- **Recorded Case Headline Exposure:** ${model.metrics.recordedCaseLossUsd}`);
   lines.push(
     `- **Counts:** ${model.metrics.evidenceFileCount} evidence file(s) (${model.metrics.verifiedIntactFileCount} intact, ${model.metrics.tamperedFileCount} tampered) · ${model.metrics.correlatedEntityCount} correlated entities · ${model.metrics.relationshipEdgeCount} relationships · ${model.metrics.timelineStepCount} timeline step(s) · ${model.metrics.warningAndAnomalyCount} warning(s)`
   );
   lines.push('');
 
-  // 4. Chronological Timeline
-  lines.push('## 3. Chronological Timeline');
+  // 3. Timeline
+  lines.push('## 3. Timeline');
   if (model.timeline.length === 0) {
     lines.push('Not recorded — no timeline steps are present in current case state.');
   } else {
@@ -1112,8 +1118,8 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
     });
   }
 
-  // 5. Evidence Register
-  lines.push('## 4. Evidence Register');
+  // 4. Evidence
+  lines.push('## 4. Evidence');
   lines.push(
     '_Note: Each uploaded file is identified by a cryptographic file fingerprint (hash — SHA-256) computed from its bytes._'
   );
@@ -1135,29 +1141,15 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
     });
   }
 
-  // 6. Correlated Entities & Graph Relationships
-  lines.push('## 5. Correlated Entities & Relationships');
-  if (model.entities.length === 0) {
-    lines.push('Not recorded — no correlated entities are present in current case state.');
-  } else {
-    model.entities.forEach((ent) => {
-      lines.push(
-        `- **${ent.displayLabel}** (${ent.plainCategory} · \`${ent.normalizedValue}\`) — Role: ${ent.roleInIncident} · Risk: ${ent.riskLevel} · Confidence: ${ent.confidencePct} · Linked files: ${ent.linkedEvidenceCount}`
-      );
-      lines.push(`  - Connections: ${ent.relationshipSummaries.join(' | ')}`);
-    });
-  }
-  lines.push('');
-
-  // 7. Financial Movements & Exposure Summary
-  lines.push('## 6. Financial Movements & Exposure Summary');
+  // 5. Money and Connections
+  lines.push('## 5. Money and Connections');
   lines.push(`- **Recorded Case Headline Exposure:** ${model.financialSummary.recordedCaseHeadlineExposure}`);
-  lines.push(`- **Policy:** ${model.financialSummary.deduplicationPolicyNote}`);
+  lines.push(`- **Deduplication Policy:** ${model.financialSummary.deduplicationPolicyNote}`);
   if (model.financialSummary.currencySubtotals.length > 0) {
     lines.push('- **Subtotals by Currency (never summed across currencies):**');
     model.financialSummary.currencySubtotals.forEach((sub) => {
       lines.push(
-        `  - **${sub.currency}:** ${sub.formattedSubtotal} (${sub.recordCount} record(s); unresolved potential duplicates without transaction ID: ${sub.unresolvedDuplicateCount})`
+        `  - **${sub.currency}:** ${sub.formattedSubtotal} (${sub.recordCount} record(s); unresolved potential duplicates: ${sub.unresolvedDuplicateCount})`
       );
     });
   } else {
@@ -1165,7 +1157,7 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
   }
   if (model.financialSummary.movements.length > 0) {
     lines.push('');
-    lines.push('### Itemized Financial Records');
+    lines.push('### Itemized Financial Movements');
     model.financialSummary.movements.forEach((m, idx) => {
       lines.push(
         `${idx + 1}. **[${m.referenceCode}]** ${m.timestamp} — **${m.rawAmountText}** (Currency: ${m.currency}, TxID: ${
@@ -1174,13 +1166,26 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
       );
     });
   }
+  if (model.entities.length > 0) {
+    lines.push('');
+    lines.push('### Correlated Entity Relationships');
+    model.entities.forEach((ent) => {
+      lines.push(
+        `- **${ent.displayLabel}** (${ent.plainCategory} · \`${ent.normalizedValue}\`) — Role: ${ent.roleInIncident} · Risk: ${ent.riskLevel} · Confidence: ${ent.confidencePct}`
+      );
+      if (ent.relationshipSummaries.length > 0) {
+        lines.push(`  - Connections: ${ent.relationshipSummaries.join(' | ')}`);
+      }
+    });
+  }
   lines.push('');
 
-  // 8. Warnings & Anomalies
-  lines.push('## 7. Warnings & Anomalies');
+  // 6. Warnings and Next Steps
+  lines.push('## 6. Warnings and Next Steps');
   if (model.warnings.length === 0) {
-    lines.push('None recorded in current case state.');
+    lines.push('- **Warnings:** None recorded in current case state.');
   } else {
+    lines.push('### Documented Warnings & Anomalies');
     model.warnings.forEach((w, idx) => {
       lines.push(
         `${idx + 1}. **[${w.severity}] ${w.category} — ${w.sourceRef}:** ${w.whatWasFound}`
@@ -1189,12 +1194,19 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
     });
   }
   lines.push('');
+  lines.push('### Actionable Next Review Points & Preservation');
+  lines.push(model.conclusion.summaryStatement);
+  lines.push('');
+  model.conclusion.nextReviewPoints.forEach((pt, idx) => {
+    lines.push(`${idx + 1}. ${pt}`);
+  });
+  lines.push('');
 
-  // 9. Integrity & Chain of Custody
-  lines.push('## 8. Integrity & Chain-of-Custody Results');
-  lines.push(`- ${model.integrity.scopeSummary}`);
-  lines.push(`- **Status Summary:** ${model.integrity.merkleChainStatus}`);
+  // 7. Technical Appendix
+  lines.push('## 7. Technical Appendix');
+  lines.push(`- **Integrity Status:** ${model.integrity.merkleChainStatus}`);
   lines.push(`- **Recorded Merkle Root / Latest Chain Hash:** \`${model.integrity.headMerkleHash}\``);
+  lines.push(`- **Evidence Scope:** ${model.integrity.scopeSummary}`);
   lines.push(`- **Important Note:** ${model.integrity.presentationDisclaimer}`);
   if (model.integrity.custodyEntries.length > 0) {
     lines.push('');
@@ -1206,16 +1218,7 @@ export function generateReportMarkdown(model: ForensicReportModel): string {
     });
   }
   lines.push('');
-
-  // 10. Conclusion, Next Review Points & Glossary
-  lines.push('## 9. Conclusion & Next Review Points');
-  lines.push(model.conclusion.summaryStatement);
-  lines.push('');
-  model.conclusion.nextReviewPoints.forEach((pt, idx) => {
-    lines.push(`${idx + 1}. ${pt}`);
-  });
-  lines.push('');
-  lines.push('## 10. Short Technical Glossary');
+  lines.push('### Forensic Glossary & Technical Terms');
   model.glossary.forEach((g) => {
     lines.push(`- **${g.term}:** ${g.definition}`);
   });
@@ -1641,17 +1644,9 @@ export async function generateReportPdfBytes(
     color: [71, 85, 105],
   });
 
-  // ── 2. Executive Summary
-  drawSectionHeading('1. Executive Summary');
+  // ── 1. Case Summary
+  drawSectionHeading('1. Case Summary');
   drawParagraph(model.summary.whatHappened, { boldPrefix: 'What Happened:' });
-  drawParagraph(model.summary.principalRisk, { boldPrefix: 'Principal Risk:' });
-  drawParagraph(model.summary.knownExposure, { boldPrefix: 'Known Exposure:' });
-  drawParagraph(model.summary.supportedConclusion, {
-    boldPrefix: 'Supported Conclusion:',
-  });
-
-  // ── 3. Case Overview & Key Figures
-  drawSectionHeading('2. Case Overview and Key Figures');
   drawTable(
     [
       { header: 'Field', width: 150 },
@@ -1661,19 +1656,36 @@ export async function generateReportPdfBytes(
       ['Case Number / ID', `${model.metrics.caseNumber} (${model.metadata.caseId})`],
       ['Case Title', model.metrics.caseTitle],
       ['Incident Typology', model.metrics.incidentType],
-      ['Severity & Risk Score', `${model.metrics.severity} (${model.metrics.riskScore})`],
-      ['Victim / Account Holder', model.metrics.victimName],
+      ['Jurisdiction', model.metadata.jurisdictionCountry],
+      ['Lead Unit', model.metadata.leadUnit],
       ['Lead Investigator', model.metrics.leadInvestigator],
+      ['Victim / Account Holder', model.metrics.victimName],
       ['Headline Exposure Estimate', model.metrics.recordedCaseLossUsd],
-      [
-        'Recorded Artifact Counts',
-        `${model.metrics.evidenceFileCount} evidence files (${model.metrics.verifiedIntactFileCount} intact, ${model.metrics.tamperedFileCount} tampered), ${model.metrics.correlatedEntityCount} entities, ${model.metrics.relationshipEdgeCount} graph links, ${model.metrics.timelineStepCount} timeline steps`,
-      ],
     ]
   );
 
-  // ── 4. Chronological Timeline
-  drawSectionHeading('3. Chronological Timeline of Events');
+  // ── 2. Key Findings
+  drawSectionHeading('2. Key Findings');
+  drawParagraph(model.summary.principalRisk, { boldPrefix: 'Principal Risk:' });
+  drawParagraph(model.summary.knownExposure, { boldPrefix: 'Known Exposure:' });
+  drawParagraph(model.summary.supportedConclusion, {
+    boldPrefix: 'Supported Conclusion:',
+  });
+  drawTable(
+    [
+      { header: 'Metric', width: 150 },
+      { header: 'Forensic Determination', width: 382 },
+    ],
+    [
+      ['Severity & Risk Score', `${model.metrics.severity} (${model.metrics.riskScore})`],
+      ['Integrity Status', `${model.metrics.verifiedIntactFileCount}/${model.metrics.evidenceFileCount} files verified intact (${model.metrics.tamperedFileCount} tampered)`],
+      ['Graph Topology', `${model.metrics.correlatedEntityCount} correlated entities, ${model.metrics.relationshipEdgeCount} directed links`],
+      ['Timeline Chronology', `${model.metrics.timelineStepCount} sequenced milestones (${model.metrics.warningAndAnomalyCount} warnings)`],
+    ]
+  );
+
+  // ── 3. Timeline
+  drawSectionHeading('3. Timeline');
   if (model.timeline.length === 0) {
     drawParagraph('Not recorded — no timeline events are present in current case state.');
   } else {
@@ -1695,8 +1707,8 @@ export async function generateReportPdfBytes(
     );
   }
 
-  // ── 5. Evidence Register
-  drawSectionHeading('4. Evidence Register (with File Fingerprints / SHA-256 Hashes)');
+  // ── 4. Evidence
+  drawSectionHeading('4. Evidence');
   drawParagraph(
     'On first use: a file fingerprint (hash) is a mathematical SHA-256 digest computed from the exact bytes of an evidence file when acquired.',
     { fontSize: 8.5, color: [71, 85, 105] }
@@ -1724,29 +1736,8 @@ export async function generateReportPdfBytes(
     );
   }
 
-  // ── 6. Correlated Entities & Graph Relationships
-  drawSectionHeading('5. Correlated Entities and Graph Relationships');
-  if (model.entities.length === 0) {
-    drawParagraph('Not recorded — no correlated entities are present in current case state.');
-  } else {
-    drawTable(
-      [
-        { header: 'Entity & Category', width: 120 },
-        { header: 'Identifier / Value', width: 132, mono: true, maxToken: 24 },
-        { header: 'Role & Risk', width: 95 },
-        { header: 'Supported Graph Relationships', width: 185 },
-      ],
-      model.entities.map((ent) => [
-        `${ent.displayLabel} (${ent.plainCategory})`,
-        ent.normalizedValue,
-        `${ent.roleInIncident} | ${ent.riskLevel} (${ent.confidencePct})`,
-        ent.relationshipSummaries.join('; '),
-      ])
-    );
-  }
-
-  // ── 7. Financial Movements & Exposure Summary
-  drawSectionHeading('6. Financial Movements and Multi-Currency Exposure');
+  // ── 5. Money and Connections
+  drawSectionHeading('5. Money and Connections');
   drawParagraph(model.financialSummary.deduplicationPolicyNote, {
     fontSize: 8.5,
     color: [71, 85, 105],
@@ -1791,12 +1782,27 @@ export async function generateReportPdfBytes(
         m.deduplicationNote,
       ])
     );
-  } else {
-    drawParagraph('No itemized financial movements recorded in current timeline.');
   }
 
-  // ── 8. Warnings & Anomalies
-  drawSectionHeading('7. Warnings and Metadata / Timestamp Anomalies');
+  if (model.entities.length > 0) {
+    drawTable(
+      [
+        { header: 'Entity & Category', width: 120 },
+        { header: 'Identifier / Value', width: 132, mono: true, maxToken: 24 },
+        { header: 'Role & Risk', width: 95 },
+        { header: 'Supported Graph Relationships', width: 185 },
+      ],
+      model.entities.map((ent) => [
+        `${ent.displayLabel} (${ent.plainCategory})`,
+        ent.normalizedValue,
+        `${ent.roleInIncident} | ${ent.riskLevel} (${ent.confidencePct})`,
+        ent.relationshipSummaries.join('; '),
+      ])
+    );
+  }
+
+  // ── 6. Warnings and Next Steps
+  drawSectionHeading('6. Warnings and Next Steps');
   if (model.warnings.length === 0) {
     drawParagraph('None recorded in current case state.');
   } else {
@@ -1813,9 +1819,13 @@ export async function generateReportPdfBytes(
       ])
     );
   }
+  drawParagraph(model.conclusion.summaryStatement);
+  model.conclusion.nextReviewPoints.forEach((pt, idx) => {
+    drawParagraph(`${idx + 1}. ${pt}`, { indent: 8 });
+  });
 
-  // ── 9. Integrity & Chain-of-Custody Results
-  drawSectionHeading('8. Integrity and Chain-of-Custody Results');
+  // ── 7. Technical Appendix
+  drawSectionHeading('7. Technical Appendix');
   drawParagraph(model.integrity.scopeSummary);
   drawParagraph(model.integrity.merkleChainStatus, {
     boldPrefix: 'Verification Result:',
@@ -1849,14 +1859,6 @@ export async function generateReportPdfBytes(
     );
   }
 
-  // ── 10. Conclusion, Next Review Points & Glossary
-  drawSectionHeading('9. Conclusion and Next Review Points');
-  drawParagraph(model.conclusion.summaryStatement);
-  model.conclusion.nextReviewPoints.forEach((pt, idx) => {
-    drawParagraph(`${idx + 1}. ${pt}`, { indent: 8 });
-  });
-
-  drawSectionHeading('10. Technical Glossary');
   model.glossary.forEach((g) => {
     drawParagraph(g.definition, { boldPrefix: `${g.term}:` });
   });
