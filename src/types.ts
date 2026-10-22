@@ -22,6 +22,25 @@ export interface RiskIndicator {
   mitreTechnique: string;
 }
 
+export interface FinancialTransaction {
+  id: string;
+  caseId: string;
+  fromEntityId?: string;
+  fromParty: string;
+  toEntityId?: string;
+  toParty: string;
+  amount: number;
+  currency: string;
+  timestamp: string;
+  channel: string;
+  referenceId: string;
+  evidenceId?: string;
+  notes?: string;
+  amountMinor?: number;
+  amountDisplay?: string;
+  paymentRail?: string;
+}
+
 export interface ForensicCaseSummary {
   id: string;
   caseNumber: string;
@@ -45,6 +64,11 @@ export interface ForensicCaseSummary {
   tamperedCount: number;
   metadataAnomalyCount: number;
   riskIndicators: RiskIndicator[];
+  jurisdictionCountry?: string;
+  leadUnit?: string;
+  transactions?: FinancialTransaction[];
+  caseOrigin?: 'PRELOADED' | 'USER_CREATED';
+  incidentDate?: string;
 }
 
 export interface BoundingBox {
@@ -88,6 +112,7 @@ export interface ExtractedEntity {
   id: string;
   caseId: string;
   entityType: string;
+  category?: string;
   normalizedValue: string;
   displayLabel: string;
   roleInIncident: string;
@@ -100,6 +125,10 @@ export interface ExtractedEntity {
   evidenceIds: string[];
   mentions: BoundingBox[];
   firstSeenAt: string;
+  country?: string;
+  city?: string;
+  lat?: number;
+  lon?: number;
 }
 
 export interface EntityRelationship {
@@ -175,4 +204,5 @@ export interface ShortestPathResult {
   nodeIds: string[];
   edgeIds: string[];
   narrativeSteps: string[];
+  orderedEntityIds?: string[];
 }

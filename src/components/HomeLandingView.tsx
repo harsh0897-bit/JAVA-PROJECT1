@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { ForensicCaseSummary } from '../types';
+import { BrandLogo } from './ui/BrandLogo';
 
 // Dynamic import for 3D Evidence Prism scene (keeps initial bundle small)
 const EvidencePrism3D = lazy(() => import('./landing/EvidencePrism3D'));
@@ -67,7 +68,7 @@ interface HomeLandingViewProps {
 const HOME_LINKS = [
   { id: 'workflow', label: 'How it works' },
   { id: 'capabilities', label: 'Key features' },
-  { id: 'cases', label: 'Sample cases' },
+  { id: 'cases', label: 'Pre-loaded cases' },
   { id: 'roles', label: 'Team roles' },
 ];
 
@@ -189,34 +190,25 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
   const overflowLinks = isCompactDesktop ? HOME_LINKS.slice(2) : [];
 
   return (
-    <div
-      className="w-full min-w-0 text-cfx-text-primary flex flex-col font-sans selection:bg-blue-100 selection:text-slate-900"
-      style={{ paddingTop: '88px' }}
-    >
+    <div className="w-full min-w-0 text-cfx-text-primary flex flex-col font-sans selection:bg-blue-100 selection:text-slate-900 min-h-screen min-h-[100dvh]">
       {/* =========================================================================
-          1. FIXED GLASS NAVBAR (Aligned with 1680px editorial content, responsive gutters)
+          1. STICKY GLASS NAVBAR (In real scroll context, position: sticky; top: 0; z-30)
           ========================================================================= */}
-      <header
-        data-scrolled={isScrolled ? 'true' : 'false'}
-        className="cf-liquid-shell fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1.5rem)] sm:w-[calc(100%-2.5rem)] lg:w-[calc(100%-3rem)] max-w-[1680px] rounded-full px-4 sm:px-6 py-2.5 transition-all duration-300"
-      >
+      <div className="sticky top-0 z-30 w-full max-w-[1680px] mx-auto px-3 sm:px-6 pt-2 pb-1">
+        <header
+          data-scrolled={isScrolled ? 'true' : 'false'}
+          className="cf-liquid-shell w-full rounded-full px-4 sm:px-6 py-2.5 transition-all duration-300"
+        >
         <div className="w-full flex items-center justify-between gap-4 min-w-0">
           {/* Left: Brand Identity (flex-shrink: 0) */}
-          <div className="flex items-center gap-3 min-w-0 shrink-0">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] flex items-center justify-center text-white shadow-xs shrink-0 border border-white/40">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="font-extrabold text-base tracking-tight text-slate-900 truncate">
-                  CyberFusion <span className="text-[#2563EB]">X</span>
-                </span>
-                <span className="hidden xl:inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50/80 text-blue-700 border border-blue-200/80 shrink-0">
-                  Digital Forensics Lab
-                </span>
-              </div>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            aria-label="CyberFusion X — Return to top"
+            className="flex items-center min-w-0 shrink-0 cursor-pointer rounded-2xl px-1 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
+          >
+            <BrandLogo variant="navbar" badgeText="Digital Forensics Lab" />
+          </button>
 
           {/* Middle: Generously spaced links */}
           {!isMobileNav && (
@@ -254,7 +246,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
                   </button>
 
                   {moreMenuOpen && (
-                    <div className="cf-pop absolute right-0 mt-2 w-48 p-2 z-50">
+                    <div className="cf-glass-panel absolute right-0 mt-2 w-48 p-2 z-40">
                       {overflowLinks.map((item) => (
                         <button
                           key={item.id}
@@ -313,7 +305,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
 
         {/* Mobile Glass Sheet (<900px) */}
         {isMobileNav && mobileMenuOpen && (
-          <div className="cf-pop mt-2 p-3 flex flex-col gap-1 w-full rounded-2xl">
+          <div className="cf-glass-panel mt-2 p-3 flex flex-col gap-1 w-full rounded-2xl">
             {HOME_LINKS.map((item) => (
               <button
                 key={item.id}
@@ -331,9 +323,10 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
           </div>
         )}
       </header>
+      </div>
 
       {/* Main Public Experience Body */}
-      <main className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-8 md:pb-12 space-y-16 flex-1 min-w-0">
+      <main className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 pt-3 pb-8 md:pb-12 space-y-16 flex-1 min-w-0">
         {/* =========================================================================
             2. HERO SECTION (Solid White Card + Light 3D Prism)
             ========================================================================= */}
@@ -372,7 +365,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
                     className="cf-droplet-idle px-5 py-3 rounded-full text-slate-900 text-sm font-semibold flex items-center gap-2 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
                   >
                     <LogIn className="w-4 h-4 text-blue-600" />
-                    <span>Try sample investigator roles</span>
+                    <span>Switch investigator role</span>
                   </button>
                 )}
 
@@ -751,7 +744,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
               <div className="text-xs font-semibold text-blue-600 mb-1">
-                Sample investigations
+                Case library
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
                 Explore pre-loaded case files
@@ -795,7 +788,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
                           {c.caseNumber}
                         </span>
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                          Sample case
+                          {c.id.startsWith('case-custom-') ? 'Entered in workspace' : 'Pre-loaded case'}
                         </span>
                       </div>
                       <span
@@ -848,7 +841,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
           <div className="space-y-3 max-w-2xl">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600">
               <Key className="w-4 h-4" />
-              <span>Three sample team roles</span>
+              <span>Role-based access</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
               Ready to explore the investigation workspace?
@@ -885,9 +878,8 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
       {/* Footer */}
       <footer className="w-full border-t border-slate-200 bg-white py-5 px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500">
         <div className="max-w-[1680px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-blue-600" />
-            <span className="font-bold text-slate-900">CyberFusion X</span>
+          <div className="flex items-center gap-2.5">
+            <BrandLogo variant="footer" />
             <span>— Digital Evidence &amp; Case Reconstruction</span>
           </div>
           <div className="text-xs text-slate-400">

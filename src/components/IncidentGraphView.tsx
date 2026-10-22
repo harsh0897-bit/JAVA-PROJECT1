@@ -60,7 +60,7 @@ interface IncidentGraphViewProps {
 
 const SVG_W = 1120;
 const SVG_H = 620;
-const NODE_R = 22; // 44px diameter solid circle
+const NODE_R = 18; // 36px diameter baseline solid circle
 
 type NodeTypeGroup =
   | 'PERSON'
@@ -702,6 +702,7 @@ const SearchableNodeSelect: React.FC<SearchableNodeSelectProps> = ({
 };
 
 export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
+  activeCase,
   evidenceList = [],
   entities,
   relationships,
@@ -762,14 +763,28 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
   // Canvas Zoom & Pan
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const zoomRef = useRef<number>(1);
+  const panRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isPanningCanvas, setIsPanningCanvas] = useState<boolean>(false);
   const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const canvasPanMovedRef = useRef<boolean>(false);
 
-  // Selection & hover state
-  const [canvasSelectedNodeId, setCanvasSelectedNodeId] = useState<string | null>(
-    selectedEntityId
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  // Selection & hover state: start with null on canvas so initial graph open is un-dimmed
+  // while the right detail card still previews selectedEntityId || entities[0].
+  const [canvasSelectedNodeId, setCanvasSelectedNodeId] = useState<string | null>(() =>
+    selectedEntityId && entities.length > 0 && selectedEntityId !== entities[0]?.id
+      ? selectedEntityId
+      : null
   );
+  const prevSelectedEntityIdRef = useRef<string | null>(selectedEntityId);
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -781,9 +796,71 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
   const [nextDropdownSlot, setNextDropdownSlot] = useState<'FROM' | 'TO'>('FROM');
   const [shortestPath, setShortestPath] = useState<ShortestPathResult | null>(null);
 
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Initialize deterministic BFS + 300-tick force layout whenever entity set changes
+  // Zoom to fit all nodes (or active route) with balanced padding preventing label clipping.
+  // Baseline full-graph fit is capped at 1.0x so nodes never appear artificially enlarged.
+  const fitNodesInView = useCallback(
+    (nodeIdsToFit?: string[]) => {
+      const isSubsetFit = !!(nodeIdsToFit && nodeIdsToFit.length > 0);
+      const ids = isSubsetFit ? nodeIdsToFit! : entities.map((e) => e.id);
+      const pts = ids
+        .map((id) => simNodesRef.current[id])
+        .filter((n): n is SimNode => !!n);
+      if (pts.length === 0) {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+        zoomRef.current = 1;
+        panRef.current = { x: 0, y: 0 };
+        return;
+      }
+
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      pts.forEach((p) => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      });
+
+      const padX = 72;
+      const padY = 56;
+      const contentMinX = minX - NODE_R - padX;
+      const contentMaxX = maxX + NODE_R + padX;
+      const contentMinY = minY - NODE_R - padY;
+      const contentMaxY = maxY + NODE_R + 36 + padY;
+
+      const boxW = Math.max(300, contentMaxX - contentMinX);
+      const boxH = Math.max(220, contentMaxY - contentMinY);
+      const maxFitZoom = isSubsetFit ? 1.15 : 1.0;
+      const targetZoom = Math.max(
+        0.65,
+        Math.min(maxFitZoom, Math.min(SVG_W / boxW, SVG_H / boxH))
+      );
+
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY + 18) / 2;
+      const cx = SVG_W / 2;
+      const cy = SVG_H / 2;
+
+      const nextZoom = Number(targetZoom.toFixed(2));
+      const nextPan = {
+        x: Math.round((cx - midX) * targetZoom),
+        y: Math.round((cy - midY) * targetZoom),
+      };
+      setZoom(nextZoom);
+      setPan(nextPan);
+      zoomRef.current = nextZoom;
+      panRef.current = nextPan;
+    },
+    [entities]
+  );
+
+  // Initialize deterministic BFS + 300-tick force layout and fit to view whenever entity set changes
   const entitySignature = useMemo(
     () => entities.map((e) => e.id).sort().join('|'),
     [entities]
@@ -792,8 +869,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
   useEffect(() => {
     simNodesRef.current = buildInitialSimulationNodes(entities, mergedEdges);
     simAlphaRef.current = 0;
+    fitNodesInView();
     setRenderTick((t) => t + 1);
-  }, [entitySignature, mergedEdges, entities]);
+  }, [entitySignature, mergedEdges, entities, fitNodesInView]);
 
   // Physics animation loop when active (during node drag or Auto-arrange)
   const startSimulationLoop = useCallback(
@@ -838,12 +916,15 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     };
   }, []);
 
-  // Keep canvasSelectedNodeId synced if parent explicitly updates selectedEntityId
+  // Keep canvasSelectedNodeId synced only when parent explicitly changes selectedEntityId
   useEffect(() => {
-    if (selectedEntityId) {
-      setCanvasSelectedNodeId(selectedEntityId);
+    if (selectedEntityId !== prevSelectedEntityIdRef.current) {
+      prevSelectedEntityIdRef.current = selectedEntityId;
+      if (selectedEntityId && selectedEntityId !== entities[0]?.id) {
+        setCanvasSelectedNodeId(selectedEntityId);
+      }
     }
-  }, [selectedEntityId]);
+  }, [selectedEntityId, entities]);
 
   // Escape key clears transient/pinned selection and edge inspection
   useEffect(() => {
@@ -858,9 +939,27 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Reset per-case graph state on case switch
+  const prevCaseIdRef = useRef<string | undefined>(activeCase?.id);
+  useEffect(() => {
+    if (prevCaseIdRef.current !== activeCase?.id) {
+      prevCaseIdRef.current = activeCase?.id;
+      setShortestPath(null);
+      setCanvasSelectedNodeId(null);
+      setHoveredEntityId(null);
+      setHoveredEdgeId(null);
+      setSelectedEdgeId(null);
+    }
+  }, [activeCase?.id]);
+
   // Synchronize default From & To dropdowns
   useEffect(() => {
-    if (entities.length === 0) return;
+    if (entities.length === 0) {
+      setPathSource('');
+      setPathTarget('');
+      setShortestPath(null);
+      return;
+    }
 
     const victimPhone =
       entities.find(
@@ -884,6 +983,15 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     setPathTarget((prev) =>
       prev && entities.some((e) => e.id === prev) ? prev : walletDst.id
     );
+    setShortestPath((prev) => {
+      if (!prev) return null;
+      const validIds = new Set(entities.map((e) => e.id));
+      const nodeIds: string[] = prev.orderedEntityIds || prev.nodeIds || [];
+      const allPresent = nodeIds.every((id: string) =>
+        validIds.has(id)
+      );
+      return allPresent ? prev : null;
+    });
   }, [entities]);
 
   // Convert client pointer coordinates to SVG world coordinates (accounting for pan & zoom)
@@ -958,7 +1066,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     draggingNodeIdRef.current = null;
 
     if (!wasDragged) {
-      // It was a click: select node + populate next dropdown if empty or alternating
+      // It was a click/tap: select node + populate next dropdown if empty or alternating
       setCanvasSelectedNodeId(nodeId);
       setSelectedEdgeId(null);
       onSelectEntity(nodeId);
@@ -989,71 +1097,16 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     }
   };
 
-  // Auto-arrange: release all pins and re-settle deterministically
+  // Auto-arrange: release all pins, re-settle deterministically, and fit to baseline view
   const handleAutoArrange = () => {
     simNodesRef.current = buildInitialSimulationNodes(entities, mergedEdges);
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setCanvasSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    fitNodesInView();
     setRenderTick((t) => t + 1);
   };
 
-  // Zoom to fit all nodes (or active route) with balanced padding preventing label clipping
-  const fitNodesInView = useCallback(
-    (nodeIdsToFit?: string[]) => {
-      const ids =
-        nodeIdsToFit && nodeIdsToFit.length > 0
-          ? nodeIdsToFit
-          : entities.map((e) => e.id);
-      const pts = ids
-        .map((id) => simNodesRef.current[id])
-        .filter((n): n is SimNode => !!n);
-      if (pts.length === 0) {
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
-        return;
-      }
-
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      pts.forEach((p) => {
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
-      });
-
-      // Include node circle radius (22px) and bottom label clearance (40px)
-      const padX = 72;
-      const padY = 56;
-      const contentMinX = minX - NODE_R - padX;
-      const contentMaxX = maxX + NODE_R + padX;
-      const contentMinY = minY - NODE_R - padY;
-      const contentMaxY = maxY + NODE_R + 36 + padY;
-
-      const boxW = Math.max(300, contentMaxX - contentMinX);
-      const boxH = Math.max(220, contentMaxY - contentMinY);
-      const targetZoom = Math.max(
-        0.65,
-        Math.min(1.4, Math.min(SVG_W / boxW, SVG_H / boxH))
-      );
-
-      const midX = (minX + maxX) / 2;
-      const midY = (minY + maxY + 18) / 2;
-      const cx = SVG_W / 2;
-      const cy = SVG_H / 2;
-
-      setZoom(Number(targetZoom.toFixed(2)));
-      setPan({
-        x: Math.round((cx - midX) * targetZoom),
-        y: Math.round((cy - midY) * targetZoom),
-      });
-    },
-    [entities]
-  );
-
-  // Canvas background pan & smooth pointer-centered wheel zoom (0.5x - 2.5x)
+  // Canvas background pan & single non-passive native wheel listener (0.5x - 2.5x)
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (draggingNodeIdRef.current) return;
     setIsPanningCanvas(true);
@@ -1078,31 +1131,72 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
     setIsPanningCanvas(false);
   };
 
-  const handleCanvasWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const relX = ((e.clientX - rect.left) / rect.width) * SVG_W;
-    const relY = ((e.clientY - rect.top) / rect.height) * SVG_H;
-    const cx = SVG_W / 2;
-    const cy = SVG_H / 2;
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
 
-    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
-    const currentZoom = zoom;
-    const newZoom = Math.max(0.5, Math.min(2.5, Number((currentZoom * zoomFactor).toFixed(3))));
-    if (Math.abs(newZoom - currentZoom) < 0.001) return;
+    const MIN_ZOOM = 0.5;
+    const MAX_ZOOM = 2.5;
 
-    const scaleRatio = newZoom / currentZoom;
-    const newPanX = pan.x + (relX - cx - pan.x) * (1 - scaleRatio);
-    const newPanY = pan.y + (relY - cy - pan.y) * (1 - scaleRatio);
+    const onWheel = (e: WheelEvent) => {
+      if (draggingNodeIdRef.current) return;
 
-    setZoom(newZoom);
-    setPan({
-      x: Math.round(Math.max(-SVG_W * 1.5, Math.min(SVG_W * 1.5, newPanX))),
-      y: Math.round(Math.max(-SVG_H * 1.5, Math.min(SVG_H * 1.5, newPanY))),
-    });
-  };
+      // Normalize deltaMode (0 = pixels, 1 = lines, 2 = pages) and trackpad pinch (ctrlKey)
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= 320;
+      if (dy === 0) return;
+
+      const currentZoom = zoomRef.current;
+
+      // Let wheel event pass through to scroll the page when already at min/max zoom limits
+      if (dy < 0 && currentZoom >= MAX_ZOOM - 0.001) {
+        return;
+      }
+      if (dy > 0 && currentZoom <= MIN_ZOOM + 0.001) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const relX = ((e.clientX - rect.left) / Math.max(1, rect.width)) * SVG_W;
+      const relY = ((e.clientY - rect.top) / Math.max(1, rect.height)) * SVG_H;
+      const cx = SVG_W / 2;
+      const cy = SVG_H / 2;
+
+      const sensitivity = e.ctrlKey ? 0.0055 : 0.0015;
+      const clampedDy = Math.max(-160, Math.min(160, dy));
+      const zoomFactor = Math.exp(-clampedDy * sensitivity);
+      const newZoom = Math.max(
+        MIN_ZOOM,
+        Math.min(MAX_ZOOM, Number((currentZoom * zoomFactor).toFixed(3)))
+      );
+      if (Math.abs(newZoom - currentZoom) < 0.001) return;
+
+      const currentPan = panRef.current;
+      const scaleRatio = newZoom / currentZoom;
+      const newPanX = currentPan.x + (relX - cx - currentPan.x) * (1 - scaleRatio);
+      const newPanY = currentPan.y + (relY - cy - currentPan.y) * (1 - scaleRatio);
+
+      const nextPan = {
+        x: Math.round(Math.max(-SVG_W * 1.2, Math.min(SVG_W * 1.2, newPanX))),
+        y: Math.round(Math.max(-SVG_H * 1.2, Math.min(SVG_H * 1.2, newPanY))),
+      };
+
+      zoomRef.current = newZoom;
+      panRef.current = nextPan;
+      setZoom(newZoom);
+      setPan(nextPan);
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, []);
 
   // Active entity for Right Detail Card:
   // Shows hovered entity for immediate live preview, falling back stably to pinned selection or default
@@ -1216,8 +1310,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
 
   const handleClearRoute = () => {
     setShortestPath(null);
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    fitNodesInView();
   };
 
   // Compute SVG edges from current simulation positions
@@ -1424,11 +1517,11 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
 
           {/* Center SVG Force Canvas */}
           <div
+            ref={canvasContainerRef}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
             onMouseLeave={handleCanvasMouseUp}
-            onWheel={handleCanvasWheel}
             onClick={() => {
               if (!canvasPanMovedRef.current) {
                 setSelectedEdgeId(null);
@@ -1438,6 +1531,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
             style={{
               height: 'clamp(460px, 60vh, 600px)',
               background: '#F6F8FC',
+              touchAction: 'pan-y',
             }}
             className={`relative w-full overflow-hidden ${
               isPanningCanvas ? 'cursor-grabbing' : 'cursor-grab'
@@ -1458,8 +1552,10 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                     animation: cfRouteFlow 0.9s linear infinite;
                   }
                   @media (prefers-reduced-motion: reduce) {
-                    .cf-route-dash {
+                    .cf-route-dash,
+                    .cf-graph-viewport {
                       animation: none !important;
+                      transition: none !important;
                     }
                   }
                 `}</style>
@@ -1504,7 +1600,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                   markerHeight="4"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#CBD5E1" opacity="0.35" />
+                  <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#CBD5E1" opacity="0.45" />
                 </marker>
 
                 {/* Focused / Hovered neighborhood arrow */}
@@ -1547,12 +1643,13 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
               </defs>
 
               <g
+                className="cf-graph-viewport"
                 style={{
                   transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   transformOrigin: 'center center',
                   transition: isPanningCanvas
                     ? 'none'
-                    : 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    : 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
               >
                 {/* ── Layer 1: Edges with Progressive Hierarchy ─────────────── */}
@@ -1565,21 +1662,21 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                       (edge.sourceId === focusNodeId ||
                         edge.targetId === focusNodeId);
 
-                    let edgeOpacity = 0.28;
+                    let edgeOpacity = 0.32;
                     let strokeColor = '#94A3B8';
-                    let strokeWidth = 1.2;
+                    let strokeWidth = 1.25;
                     let markerEnd = 'url(#edge-arrow-default)';
 
                     if (hasActiveRoute) {
                       if (inRoute) {
                         edgeOpacity = 1.0;
                         strokeColor = '#2563EB';
-                        strokeWidth = 3.5;
+                        strokeWidth = 3.2;
                         markerEnd = 'url(#edge-arrow-route)';
                       } else {
-                        edgeOpacity = 0.08;
+                        edgeOpacity = 0.16;
                         strokeColor = '#CBD5E1';
-                        strokeWidth = 1.0;
+                        strokeWidth = 1.1;
                         markerEnd = 'url(#edge-arrow-quiet)';
                       }
                     } else if (focusNodeId !== null) {
@@ -1589,9 +1686,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                         strokeWidth = 2.2;
                         markerEnd = 'url(#edge-arrow-focused)';
                       } else {
-                        edgeOpacity = 0.10;
+                        edgeOpacity = 0.16;
                         strokeColor = '#CBD5E1';
-                        strokeWidth = 1.0;
+                        strokeWidth = 1.1;
                         markerEnd = 'url(#edge-arrow-quiet)';
                       }
                     } else {
@@ -1602,9 +1699,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                         strokeWidth = 2.2;
                         markerEnd = 'url(#edge-arrow-focused)';
                       } else {
-                        edgeOpacity = 0.28;
+                        edgeOpacity = 0.32;
                         strokeColor = '#94A3B8';
-                        strokeWidth = 1.2;
+                        strokeWidth = 1.25;
                         markerEnd = 'url(#edge-arrow-default)';
                       }
                     }
@@ -1630,12 +1727,12 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             stroke="transparent"
                             strokeWidth={14}
                           />
-                          {/* 4px solid brand base */}
+                          {/* 3.5px solid brand base */}
                           <path
                             d={d}
                             fill="none"
                             stroke="#2563EB"
-                            strokeWidth={4}
+                            strokeWidth={3.5}
                             strokeOpacity={0.32}
                             markerEnd={markerEnd}
                           />
@@ -1644,7 +1741,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             d={d}
                             fill="none"
                             stroke="#2563EB"
-                            strokeWidth={4}
+                            strokeWidth={3.5}
                             strokeDasharray="8 6"
                             className="cf-route-dash"
                             markerEnd={markerEnd}
@@ -1688,7 +1785,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                   })}
                 </g>
 
-                {/* ── Layer 2: Draggable Solid 44px Nodes + Short Labels ─── */}
+                {/* ── Layer 2: Draggable Solid 36px Baseline Nodes + Short Labels ─── */}
                 <g>
                   {entities.map((entity) => {
                     const pos = simNodesRef.current[entity.id];
@@ -1697,7 +1794,6 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                     const st = getNodeTypeStyle(entity.entityType);
                     const isHovered = hoveredEntityId === entity.id;
                     const isCanvasSelected = canvasSelectedNodeId === entity.id;
-                    const isSelected = selectedEntity?.id === entity.id;
                     const routeStep = routeInfo.nodeOrder[entity.id];
                     const inRoute = routeStep !== undefined;
 
@@ -1714,12 +1810,12 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
 
                     let nodeOpacity = 1;
                     if (hasActiveRoute) {
-                      nodeOpacity = inRoute ? 1 : 0.28;
+                      nodeOpacity = inRoute ? 1 : 0.38;
                     } else if (focusNodeId !== null) {
                       nodeOpacity =
                         entity.id === focusNodeId || isNeighborOfFocus
                           ? 1
-                          : 0.35;
+                          : 0.42;
                     }
 
                     const isHighRisk = entity.riskLevel === 'CRITICAL';
@@ -1762,25 +1858,20 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                       >
                         <title>{`${entity.displayLabel || entity.normalizedValue} (${st.singularLabel})${pos.pinned ? ' — Pinned (double-click to unpin)' : ''}`}</title>
 
-                        {/* Hover scale wrapper (1.06x on hover) */}
-                        <g
-                          style={{
-                            transform: isHovered ? 'scale(1.06)' : 'scale(1)',
-                            transition: 'transform 150ms ease-out',
-                          }}
-                        >
-                          {/* Route or Selected/Pinned outer ring (3px #2563EB) */}
-                          {(inRoute || isCanvasSelected) && (
+                        {/* Constant-size node group (never scales on hover or selection) */}
+                        <g>
+                          {/* Route, Selected, or Hovered outer outline ring (#2563EB) */}
+                          {(inRoute || isCanvasSelected || isHovered) && (
                             <circle
                               r={NODE_R + 3.5}
                               fill="none"
                               stroke="#2563EB"
-                              strokeWidth={3}
+                              strokeWidth={2.5}
                             />
                           )}
 
                           {/* Direct neighbor highlight ring when focus is active */}
-                          {!inRoute && !isCanvasSelected && isNeighborOfFocus && (
+                          {!inRoute && !isCanvasSelected && !isHovered && isNeighborOfFocus && (
                             <circle
                               r={NODE_R + 3.0}
                               fill="none"
@@ -1790,21 +1881,21 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                             />
                           )}
 
-                          {/* Main 44px solid circle with 3px white ring and soft drop shadow */}
+                          {/* Main 36px baseline solid circle with 2.5px white ring and soft drop shadow */}
                           <circle
                             r={NODE_R}
                             fill={st.color}
                             stroke="#FFFFFF"
-                            strokeWidth={3}
+                            strokeWidth={2.5}
                             filter="url(#node-soft-shadow)"
                           />
 
                           {/* White line icon inside */}
                           <foreignObject
-                            x={-10}
-                            y={-10}
-                            width={20}
-                            height={20}
+                            x={-9}
+                            y={-9}
+                            width={18}
+                            height={18}
                             className="pointer-events-none"
                           >
                             <div className="w-full h-full flex items-center justify-center">
@@ -1815,30 +1906,30 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                           {/* Small risk dot on top-right corner (red = high risk, amber = watch) */}
                           {(isHighRisk || isWatchRisk) && !inRoute && (
                             <circle
-                              cx={15}
-                              cy={-15}
-                              r={5.5}
+                              cx={12.5}
+                              cy={-12.5}
+                              r={5}
                               fill={isHighRisk ? '#E24A3B' : '#D9822B'}
                               stroke="#FFFFFF"
-                              strokeWidth={2}
+                              strokeWidth={1.75}
                             />
                           )}
 
                           {/* Numbered route badge (1, 2, 3...) when on active route */}
                           {inRoute && (
-                            <g transform="translate(16, -16)">
+                            <g transform="translate(13.5, -13.5)">
                               <circle
-                                r={9.5}
+                                r={8.5}
                                 fill="#2563EB"
                                 stroke="#FFFFFF"
-                                strokeWidth={2}
+                                strokeWidth={1.75}
                               />
                               <text
                                 x={0}
-                                y={3.5}
+                                y={3}
                                 textAnchor="middle"
                                 fill="#FFFFFF"
-                                fontSize={10}
+                                fontSize={9.5}
                                 fontWeight={700}
                                 fontFamily="Inter, system-ui, sans-serif"
                               >
@@ -1850,9 +1941,9 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
                           {/* Tiny pin dot at top-left when user has pinned the node */}
                           {pos.pinned && (
                             <circle
-                              cx={-15}
-                              cy={-15}
-                              r={3.5}
+                              cx={-12.5}
+                              cy={-12.5}
+                              r={3}
                               fill="#141B2D"
                               stroke="#FFFFFF"
                               strokeWidth={1.5}
@@ -1989,7 +2080,13 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
             <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/92 backdrop-blur-md border border-slate-200/90 shadow-sm rounded-xl p-1">
               <button
                 type="button"
-                onClick={() => setZoom((z) => Math.min(2.5, Number((z * 1.2).toFixed(2))))}
+                onClick={() =>
+                  setZoom((z) => {
+                    const next = Math.min(2.5, Number((z * 1.2).toFixed(2)));
+                    zoomRef.current = next;
+                    return next;
+                  })
+                }
                 className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-700 text-sm font-bold transition cursor-pointer"
                 title="Zoom in"
                 aria-label="Zoom in"
@@ -1998,7 +2095,13 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setZoom((z) => Math.max(0.5, Number((z / 1.2).toFixed(2))))}
+                onClick={() =>
+                  setZoom((z) => {
+                    const next = Math.max(0.5, Number((z / 1.2).toFixed(2)));
+                    zoomRef.current = next;
+                    return next;
+                  })
+                }
                 className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-700 text-sm font-bold transition cursor-pointer"
                 title="Zoom out"
                 aria-label="Zoom out"

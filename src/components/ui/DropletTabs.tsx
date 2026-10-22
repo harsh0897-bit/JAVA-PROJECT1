@@ -58,6 +58,10 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
   const { trackRef, pillRef, bodyRef, pulse } = useDropSlider(effectiveValue);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const reducedMotionRef = useRef<boolean>(false);
+  const prevValueRef = useRef<string>(value);
+  const pulseOverlayRef = useRef<HTMLSpanElement | null>(null);
+  const pulseBarRef = useRef<HTMLSpanElement | null>(null);
+  const pulseAnimRef = useRef<Animation | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -66,8 +70,120 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
       reducedMotionRef.current = e.matches;
     };
     mq.addEventListener('change', onChangeMotion);
-    return () => mq.removeEventListener('change', onChangeMotion);
+    return () => {
+      mq.removeEventListener('change', onChangeMotion);
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.cancel();
+        pulseAnimRef.current = null;
+      }
+    };
   }, []);
+
+  // F3: Directional flowing blue pulse along stepper connectors on stage change
+  useEffect(() => {
+    if (!isStepper || !connectors) {
+      prevValueRef.current = value;
+      return;
+    }
+
+    const prevId = prevValueRef.current;
+    prevValueRef.current = value;
+
+    if (prevId === value) return;
+
+    // Cancel any running pulse animation immediately on rapid second click
+    if (pulseAnimRef.current) {
+      pulseAnimRef.current.cancel();
+      pulseAnimRef.current = null;
+    }
+
+    const track = trackRef.current;
+    const overlay = pulseOverlayRef.current;
+    const bar = pulseBarRef.current;
+    if (!track || !overlay || !bar) return;
+
+    // Under prefers-reduced-motion or narrow horizontal overflow, skip traveling pulse
+    if (
+      reducedMotionRef.current ||
+      track.scrollWidth > track.clientWidth + 4 ||
+      typeof bar.animate !== 'function'
+    ) {
+      overlay.style.opacity = '0';
+      return;
+    }
+
+    const fromIdx = items.findIndex((it) => it.id === prevId);
+    const toIdx = items.findIndex((it) => it.id === value);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
+      overlay.style.opacity = '0';
+      return;
+    }
+
+    const fromBtn = itemRefs.current[fromIdx];
+    const toBtn = itemRefs.current[toIdx];
+    if (!fromBtn || !toBtn) {
+      overlay.style.opacity = '0';
+      return;
+    }
+
+    // Measure connector path geometry once per transition (no per-frame DOM reads)
+    const isForward = toIdx > fromIdx;
+    const startX = isForward
+      ? fromBtn.offsetLeft + fromBtn.offsetWidth * 0.72
+      : fromBtn.offsetLeft + fromBtn.offsetWidth * 0.28;
+    const endX = isForward
+      ? toBtn.offsetLeft + toBtn.offsetWidth * 0.28
+      : toBtn.offsetLeft + toBtn.offsetWidth * 0.72;
+
+    const spanLeft = Math.min(startX, endX);
+    const spanWidth = Math.max(16, Math.abs(endX - startX));
+    const pulseWidth = Math.max(44, Math.min(120, Math.round(spanWidth * 0.36)));
+
+    overlay.style.left = `${Math.round(spanLeft)}px`;
+    overlay.style.width = `${Math.round(spanWidth)}px`;
+    overlay.style.opacity = '1';
+
+    bar.style.width = `${pulseWidth}px`;
+    const travelStart = isForward ? -pulseWidth : spanWidth;
+    const travelEnd = isForward ? spanWidth : -pulseWidth;
+
+    const anim = bar.animate(
+      [
+        { transform: `translate3d(${travelStart}px, 0, 0)`, opacity: 0.2 },
+        {
+          transform: `translate3d(${Math.round((travelStart + travelEnd) * 0.35)}px, 0, 0)`,
+          opacity: 0.95,
+          offset: 0.3,
+        },
+        {
+          transform: `translate3d(${Math.round((travelStart + travelEnd) * 0.75)}px, 0, 0)`,
+          opacity: 0.9,
+          offset: 0.75,
+        },
+        { transform: `translate3d(${travelEnd}px, 0, 0)`, opacity: 0 },
+      ],
+      {
+        duration: 500,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'forwards',
+      }
+    );
+
+    anim.finished?.catch(() => {});
+    pulseAnimRef.current = anim;
+    anim.onfinish = () => {
+      if (pulseAnimRef.current === anim) {
+        overlay.style.opacity = '0';
+        pulseAnimRef.current = null;
+      }
+    };
+    anim.oncancel = () => {
+      if (pulseAnimRef.current === anim) {
+        overlay.style.opacity = '0';
+        pulseAnimRef.current = null;
+      }
+    };
+  }, [value, isStepper, connectors, items, trackRef]);
 
   // Scroll active item into center when the track overflows horizontally
   useEffect(() => {
@@ -122,10 +238,12 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
     }
   };
 
+  // Padding py-1.5 px-1.5 (-my-1.5 -mx-1.5) gives the rounded active pill shadow and focus ring
+  // 6px of unclipped clearance inside overflow-x-auto so no rectangular shadow artifact occurs.
   const trackLayoutClasses =
     isStepper && connectors
       ? 'cf-stepper-track relative flex items-center w-full h-[var(--row2,60px)] overflow-visible no-scrollbar'
-      : 'relative inline-flex items-center gap-1.5 max-w-full overflow-x-auto snap-x no-scrollbar';
+      : 'relative inline-flex items-center gap-1.5 max-w-full overflow-x-auto snap-x no-scrollbar py-1.5 px-1.5 -my-1.5 -mx-1.5';
 
   const labelColorStyle: React.CSSProperties = {
     transition: 'color 200ms ease',
@@ -158,6 +276,39 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
             .cf-step-connector{flex:0 0 8px!important}
           }
         `}</style>
+      )}
+
+      {/* F3: Reusable pointer-events-none directional pulse overlay along stepper connectors */}
+      {isStepper && connectors && (
+        <span
+          ref={pulseOverlayRef}
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: 0,
+            width: 0,
+            height: '4px',
+            marginTop: '-2px',
+            borderRadius: '9999px',
+            overflow: 'hidden',
+            pointerEvents: 'none',
+            opacity: 0,
+            zIndex: 0,
+          }}
+        >
+          <span
+            ref={pulseBarRef}
+            style={{
+              display: 'block',
+              height: '100%',
+              borderRadius: '9999px',
+              background:
+                'linear-gradient(90deg, rgba(59,130,246,0) 0%, #3B82F6 35%, #2563EB 65%, rgba(37,99,235,0) 100%)',
+              willChange: 'transform, opacity',
+            }}
+          />
+        </span>
       )}
 
       <span ref={pillRef} data-drop-pill aria-hidden className="cf-drop-slider">
@@ -194,6 +345,7 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
               role="tab"
               id={tabDomId}
               aria-selected={isActive}
+              aria-current={isStepper && isActive ? 'step' : undefined}
               aria-controls={panelDomId}
               disabled={item.disabled}
               tabIndex={isActive ? 0 : -1}
@@ -223,9 +375,9 @@ export const DropletTabs: React.FC<DropletTabsProps> = ({
               className={clsx(
                 'group',
                 buttonSurfaceClasses,
-                'relative z-10 min-w-0 inline-flex items-center justify-start',
+                'relative z-10 min-w-0 inline-flex items-center justify-start rounded-full',
                 buttonSizeClasses,
-                'select-none cursor-pointer snap-center disabled:opacity-45 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2'
+                'select-none cursor-pointer snap-center disabled:opacity-45 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1'
               )}
             >
               {renderItem ? (

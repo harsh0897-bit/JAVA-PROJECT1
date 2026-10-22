@@ -26,6 +26,7 @@ import {
 } from '../types';
 import { copyToClipboardSafe } from '../lib/clipboard';
 import { DropletTabs, DropletTabItem } from './ui/DropletTabs';
+import { Modal } from './ui/Modal';
 
 interface EvidenceVaultViewProps {
   caseId: string;
@@ -1172,114 +1173,101 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       </div>
 
       {/* ── Add Evidence Modal ──────────────────────────────────────────────── */}
-      {showIngestDrawer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="cf-card max-w-xl w-full p-6 space-y-5 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Upload className="w-5 h-5 text-blue-600" />
-                <h3 className="text-base font-bold text-slate-900">
-                  Add Evidence File
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowIngestDrawer(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+      {/* ── Add Evidence Modal (Portaled Modal) ───────────────────────────── */}
+      <Modal
+        isOpen={showIngestDrawer}
+        onClose={() => setShowIngestDrawer(false)}
+        title="Add Evidence File"
+        icon={<Upload className="w-5 h-5 text-blue-600" />}
+        maxWidthClass="max-w-xl"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-1">
+          {/* Upload File */}
+          <div className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-3">
+            <div className="font-bold text-slate-900">Upload from computer</div>
+            <div>
+              <label className="block text-slate-600 font-medium mb-1">
+                File type
+              </label>
+              <select
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
+                className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
               >
-                <X className="w-5 h-5" />
-              </button>
+                <option value="SMS_SCREENSHOT">Screenshot / Message</option>
+                <option value="TRANSACTION_RECEIPT">Bank / Payment Receipt</option>
+                <option value="EMAIL_HEADER">Email / Login Log</option>
+              </select>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              {/* Upload File */}
-              <div className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-3">
-                <div className="font-bold text-slate-900">Upload from computer</div>
-                <div>
-                  <label className="block text-slate-600 font-medium mb-1">
-                    File type
-                  </label>
-                  <select
-                    value={uploadCategory}
-                    onChange={(e) => setUploadCategory(e.target.value)}
-                    className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
-                  >
-                    <option value="SMS_SCREENSHOT">Screenshot / Message</option>
-                    <option value="TRANSACTION_RECEIPT">Bank / Payment Receipt</option>
-                    <option value="EMAIL_HEADER">Email / Login Log</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-medium mb-1">
-                    Notes
-                  </label>
-                  <input
-                    type="text"
-                    value={uploadNotes}
-                    onChange={(e) => setUploadNotes(e.target.value)}
-                    className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
-                  />
-                </div>
-                <label className="cf-btn-blue w-full h-9 inline-flex items-center justify-center gap-2 cursor-pointer font-semibold">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>{busyAction ? 'Uploading…' : 'Choose file'}</span>
-                  <input
-                    type="file"
-                    onChange={handleFileChange}
-                    disabled={busyAction}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {/* Quick Sample Text */}
-              <form
-                onSubmit={handleQuickIngestSubmit}
-                className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-2.5"
-              >
-                <div className="font-bold text-slate-900">Add text transcript</div>
-                <div className="flex gap-1.5">
-                  {PRESET_TEMPLATES.map((tpl, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setQuickTitle(tpl.title);
-                        setQuickCategory(tpl.category);
-                        setQuickContent(tpl.content);
-                      }}
-                      className="px-2 py-1 rounded bg-white border border-slate-200 text-[10px] font-semibold text-blue-600 hover:bg-blue-50 cursor-pointer"
-                    >
-                      Sample {i + 1}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  value={quickTitle}
-                  onChange={(e) => setQuickTitle(e.target.value)}
-                  placeholder="Title"
-                  className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
-                />
-                <textarea
-                  rows={3}
-                  value={quickContent}
-                  onChange={(e) => setQuickContent(e.target.value)}
-                  placeholder="Paste text content..."
-                  className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800 font-mono text-[11px]"
-                />
-                <button
-                  type="submit"
-                  disabled={busyAction}
-                  className="w-full h-9 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 font-semibold text-slate-800 cursor-pointer"
-                >
-                  {busyAction ? 'Adding…' : 'Save text evidence'}
-                </button>
-              </form>
+            <div>
+              <label className="block text-slate-600 font-medium mb-1">
+                Notes
+              </label>
+              <input
+                type="text"
+                value={uploadNotes}
+                onChange={(e) => setUploadNotes(e.target.value)}
+                className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
+              />
             </div>
+            <label className="cf-btn-blue w-full h-9 inline-flex items-center justify-center gap-2 cursor-pointer font-semibold">
+              <Upload className="w-3.5 h-3.5" />
+              <span>{busyAction ? 'Uploading…' : 'Choose file'}</span>
+              <input
+                type="file"
+                onChange={handleFileChange}
+                disabled={busyAction}
+                className="hidden"
+              />
+            </label>
           </div>
+
+          {/* Quick Sample Text */}
+          <form
+            onSubmit={handleQuickIngestSubmit}
+            className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-2.5"
+          >
+            <div className="font-bold text-slate-900">Add text transcript</div>
+            <div className="flex gap-1.5">
+              {PRESET_TEMPLATES.map((tpl, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setQuickTitle(tpl.title);
+                    setQuickCategory(tpl.category);
+                    setQuickContent(tpl.content);
+                  }}
+                  className="px-2 py-1 rounded bg-white border border-slate-200 text-[10px] font-semibold text-blue-600 hover:bg-blue-50 cursor-pointer"
+                >
+                  Sample {i + 1}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              placeholder="Title"
+              className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800"
+            />
+            <textarea
+              rows={3}
+              value={quickContent}
+              onChange={(e) => setQuickContent(e.target.value)}
+              placeholder="Paste text content..."
+              className="w-full p-2 rounded-lg bg-white border border-slate-200 text-slate-800 font-mono text-[11px]"
+            />
+            <button
+              type="submit"
+              disabled={busyAction}
+              className="w-full h-9 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 font-semibold text-slate-800 cursor-pointer"
+            >
+              {busyAction ? 'Adding…' : 'Save text evidence'}
+            </button>
+          </form>
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

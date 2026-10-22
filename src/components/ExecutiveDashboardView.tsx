@@ -33,34 +33,109 @@ interface ExecutiveDashboardViewProps {
   ) => void;
   onSelectEntityForGraph: (entityId: string) => void;
   onSelectEvidenceForVault: (evidenceId: string) => void;
+  onEditCase?: () => void;
 }
 
 export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
   activeCase,
   evidenceList,
   entities,
+  relationships,
   timeline,
   onNavigateTab,
   onSelectEvidenceForVault,
+  onEditCase,
 }) => {
+  const isUserCreated =
+    activeCase.caseOrigin === 'USER_CREATED' ||
+    activeCase.id.startsWith('case-custom-');
+
   const displayEvidence = useMemo(() => {
     return evidenceList.slice(0, 4);
   }, [evidenceList]);
 
-  const riskScore = activeCase.riskScore || 81;
-  const anomalyCount = activeCase.metadataAnomalyCount || 1;
-  const formattedLoss = (activeCase.estimatedLossUsd || 18450).toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  });
+  const riskScore = isUserCreated
+    ? activeCase.riskScore ?? 0
+    : activeCase.riskScore || 81;
+  const anomalyCount = isUserCreated
+    ? activeCase.metadataAnomalyCount ?? 0
+    : activeCase.metadataAnomalyCount || 1;
+
+  const formattedLoss = useMemo(() => {
+    const txs = activeCase.transactions || [];
+    if (txs.length > 0) {
+      const byCurr = new Map<string, number>();
+      const seenRef = new Set<string>();
+      for (const tx of txs) {
+        const ref = (tx.referenceId || '').trim();
+        if (ref) {
+          const k = `${tx.currency}:${ref.toLowerCase()}`;
+          if (seenRef.has(k)) continue;
+          seenRef.add(k);
+        }
+        const curr = (tx.currency || 'USD').toUpperCase();
+        const minor =
+          typeof tx.amountMinor === 'number' && Number.isFinite(tx.amountMinor)
+            ? tx.amountMinor
+            : Math.round((Number(tx.amountDisplay) || 0) * 100);
+        byCurr.set(curr, (byCurr.get(curr) || 0) + minor);
+      }
+      if (byCurr.size > 0) {
+        return Array.from(byCurr.entries())
+          .map(([curr, minor]) => {
+            const major = minor / 100;
+            try {
+              return major.toLocaleString('en-US', {
+                style: 'currency',
+                currency: curr,
+                maximumFractionDigits: minor % 100 === 0 ? 0 : 2,
+              });
+            } catch {
+              return `${curr} ${major.toFixed(2)}`;
+            }
+          })
+          .join(' · ');
+      }
+    }
+    if (isUserCreated) {
+      if (
+        typeof activeCase.estimatedLossUsd === 'number' &&
+        activeCase.estimatedLossUsd > 0
+      ) {
+        return activeCase.estimatedLossUsd.toLocaleString('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: 0,
+        });
+      }
+      return 'Not recorded';
+    }
+    return (activeCase.estimatedLossUsd || 18450).toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    });
+  }, [activeCase.transactions, activeCase.estimatedLossUsd, isUserCreated]);
 
   // Four-step "What happened" case narrative derived from case timeline events
   const narrativeSteps = useMemo(() => {
+    if (isUserCreated) {
+      return [...(timeline || [])]
+        .sort((a, b) => {
+          if (!a.eventTimestamp && !b.eventTimestamp) return 0;
+          if (!a.eventTimestamp) return 1;
+          if (!b.eventTimestamp) return -1;
+          return (
+            new Date(a.eventTimestamp).getTime() -
+            new Date(b.eventTimestamp).getTime()
+          );
+        })
+        .slice(0, 4);
+    }
     if (timeline && timeline.length >= 4) {
       return timeline.slice(0, 4);
     }
-    // Fallback four steps if timeline is loading or custom
+    // Fallback four steps for pre-loaded cases only
     return [
       {
         id: 'step-1',
@@ -100,7 +175,7 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
         anomalyFlag: false,
       },
     ];
-  }, [timeline]);
+  }, [timeline, isUserCreated]);
 
   return (
     <div className="mx-auto w-full max-w-[1680px] pb-12 space-y-5 min-w-0 font-sans">
@@ -131,8 +206,17 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
             </h1>
           </div>
 
-          {/* Two Clean Header Actions */}
+          {/* Header Actions */}
           <div className="flex items-center gap-2.5 shrink-0">
+            {onEditCase && (
+              <button
+                type="button"
+                onClick={onEditCase}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-[#E2E8F1] text-[#0F1B33] text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <span>Edit case</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onNavigateTab('EVIDENCE')}
@@ -160,10 +244,12 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
         {/* Left 8 Columns: Responsive 3D Threat Globe Card */}
         <div className="lg:col-span-8 min-w-0">
           <ThreatGlobe
+            activeCase={activeCase}
             entities={entities}
+            relationships={relationships}
             onInspectGraph={() => onNavigateTab('GRAPH')}
             style={{
-              height: 'clamp(460px, calc(100dvh - var(--shell-h, 160px) - 150px), 760px)',
+              height: 'clamp(524px, calc(100dvh - var(--shell-h, 148px) - 86px), 820px)',
             }}
           />
         </div>
@@ -188,7 +274,7 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
                 {riskScore}/100
               </div>
               <div className="mt-1 text-[11px] text-[#DC2626] font-medium truncate">
-                Immediate review
+                {riskScore >= 70 ? 'Immediate review' : `${entities.length} ${entities.length === 1 ? 'entity' : 'entities'} tracked`}
               </div>
             </button>
 
@@ -204,11 +290,11 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
                 </span>
                 <Coins className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />
               </div>
-              <div className="mt-1 text-xl font-bold text-[#0F1B33] tabular-nums tracking-tight truncate">
+              <div className="mt-1 text-base sm:text-lg font-bold text-[#0F1B33] tabular-nums tracking-tight truncate" title={formattedLoss}>
                 {formattedLoss}
               </div>
               <div className="mt-1 text-[11px] text-[#5B6B85] truncate">
-                {activeCase.victimName?.split(' ')[0] || 'Victim'} loss
+                {activeCase.victimName?.split(' ')[0] || 'Recorded'} exposure
               </div>
             </button>
 
@@ -225,10 +311,13 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
                 <span className="w-2 h-2 rounded-full bg-[#059669] shrink-0" />
               </div>
               <div className="mt-1 text-xl font-bold text-[#0F1B33] tabular-nums tracking-tight">
-                {evidenceList.length || 4} files
+                {isUserCreated ? evidenceList.length : evidenceList.length || 4}{' '}
+                {(isUserCreated ? evidenceList.length : evidenceList.length || 4) === 1
+                  ? 'file'
+                  : 'files'}
               </div>
               <div className="mt-1 text-[11px] text-[#059669] font-medium truncate">
-                WORM sealed
+                {evidenceList.length > 0 ? 'WORM sealed' : 'No files recorded'}
               </div>
             </button>
 
@@ -248,7 +337,11 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
                 {anomalyCount} {anomalyCount === 1 ? 'anomaly' : 'anomalies'}
               </div>
               <div className="mt-1 text-[11px] text-[#D97706] font-medium truncate">
-                EXIF timestomp
+                {isUserCreated
+                  ? anomalyCount > 0
+                    ? 'Flagged in case'
+                    : 'No warnings flagged'
+                  : 'EXIF timestomp'}
               </div>
             </button>
           </div>
@@ -269,31 +362,39 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
             </div>
 
             <div className="space-y-2">
-              {displayEvidence.map((ev) => (
-                <div
-                  key={ev.id}
-                  onClick={() => {
-                    onSelectEvidenceForVault(ev.id);
-                    onNavigateTab('EVIDENCE');
-                  }}
-                  className="p-2.5 rounded-xl bg-[#F8FAFD] border border-[#E2E8F1] hover:border-[#2563EB] transition cursor-pointer min-w-0 group"
-                >
-                  <div className="flex items-center justify-between gap-2 min-w-0">
-                    <span className="text-xs font-semibold text-[#0F1B33] group-hover:text-[#2563EB] transition truncate">
-                      {ev.originalFilename}
-                    </span>
-                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">
-                      {ev.evidenceCode}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-[#5B6B85] mt-0.5">
-                    <span className="truncate">{ev.evidenceCategory || 'DOCUMENT'}</span>
-                    <span className="tabular-nums shrink-0 ml-2">
-                      {Math.max(1, Math.round(ev.fileSizeBytes / 1024))} KB
-                    </span>
-                  </div>
+              {displayEvidence.length === 0 ? (
+                <div className="p-3 rounded-xl bg-[#F8FAFD] border border-[#E2E8F1] text-xs text-[#5B6B85]">
+                  No evidence files recorded for this case yet.
                 </div>
-              ))}
+              ) : (
+                displayEvidence.map((ev) => (
+                  <div
+                    key={ev.id}
+                    onClick={() => {
+                      onSelectEvidenceForVault(ev.id);
+                      onNavigateTab('EVIDENCE');
+                    }}
+                    className="p-2.5 rounded-xl bg-[#F8FAFD] border border-[#E2E8F1] hover:border-[#2563EB] transition cursor-pointer min-w-0 group"
+                  >
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="text-xs font-semibold text-[#0F1B33] group-hover:text-[#2563EB] transition truncate">
+                        {ev.originalFilename}
+                      </span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">
+                        {ev.evidenceCode}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-[#5B6B85] mt-0.5">
+                      <span className="truncate">{ev.evidenceCategory || 'DOCUMENT'}</span>
+                      <span className="tabular-nums shrink-0 ml-2">
+                        {ev.fileSizeBytes > 0
+                          ? `${Math.max(1, Math.round(ev.fileSizeBytes / 1024))} KB`
+                          : 'Metadata only'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -332,65 +433,71 @@ export const ExecutiveDashboardView: React.FC<ExecutiveDashboardViewProps> = ({
         </div>
 
         {/* 4-Step Sequence Spine */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 relative min-w-0">
-          {narrativeSteps.map((step, idx) => {
-            const isAnomaly = !!step.anomalyFlag;
-            return (
-              <div
-                key={step.id || idx}
-                onClick={() => onNavigateTab('TIMELINE')}
-                className="relative p-4 rounded-2xl bg-[#F8FAFD] border border-[#E2E8F1] hover:border-[#2563EB] transition cursor-pointer flex flex-col justify-between space-y-2.5 min-w-0 group"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-[#2563EB] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                      {idx + 1}
-                    </span>
-                    <span className="text-[11px] font-mono font-semibold text-[#5B6B85] uppercase tracking-wider">
-                      {step.killChainPhase || `STEP 0${idx + 1}`}
-                    </span>
+        {narrativeSteps.length === 0 ? (
+          <div className="p-4 rounded-2xl bg-[#F8FAFD] border border-[#E2E8F1] text-xs text-[#5B6B85]">
+            No timeline events recorded for this case yet. Open the Timeline stage to add steps.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 relative min-w-0">
+            {narrativeSteps.map((step, idx) => {
+              const isAnomaly = !!step.anomalyFlag;
+              return (
+                <div
+                  key={step.id || idx}
+                  onClick={() => onNavigateTab('TIMELINE')}
+                  className="relative p-4 rounded-2xl bg-[#F8FAFD] border border-[#E2E8F1] hover:border-[#2563EB] transition cursor-pointer flex flex-col justify-between space-y-2.5 min-w-0 group"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-[#2563EB] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <span className="text-[11px] font-mono font-semibold text-[#5B6B85] uppercase tracking-wider">
+                        {step.killChainPhase || `STEP 0${idx + 1}`}
+                      </span>
+                    </div>
+
+                    {isAnomaly ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-[#D97706] border border-amber-200 text-[10px] font-semibold">
+                        <AlertTriangle className="w-3 h-3" />
+                        Warning
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-[#2563EB] text-[10px] font-semibold">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Recorded
+                      </span>
+                    )}
                   </div>
 
-                  {isAnomaly ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-[#D97706] border border-amber-200 text-[10px] font-semibold">
-                      <AlertTriangle className="w-3 h-3" />
-                      Warning
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-[#2563EB] text-[10px] font-semibold">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Verified
-                    </span>
-                  )}
-                </div>
+                  <div className="space-y-1 min-w-0">
+                    <h3 className="text-xs font-bold text-[#0F1B33] group-hover:text-[#2563EB] transition leading-snug line-clamp-2">
+                      {step.title}
+                    </h3>
+                    <p className="text-[11px] text-[#5B6B85] leading-relaxed line-clamp-3">
+                      {step.description}
+                    </p>
+                  </div>
 
-                <div className="space-y-1 min-w-0">
-                  <h3 className="text-xs font-bold text-[#0F1B33] group-hover:text-[#2563EB] transition leading-snug line-clamp-2">
-                    {step.title}
-                  </h3>
-                  <p className="text-[11px] text-[#5B6B85] leading-relaxed line-clamp-3">
-                    {step.description}
-                  </p>
+                  <div className="pt-2 border-t border-slate-200/60 text-[11px] font-mono text-slate-500 flex items-center justify-between">
+                    <span>
+                      {step.eventTimestamp
+                        ? new Date(step.eventTimestamp).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            timeZone: 'UTC',
+                          }) + ' UTC'
+                        : 'Date not recorded'}
+                    </span>
+                    <span className="text-xs text-slate-400 group-hover:text-[#2563EB] transition">
+                      →
+                    </span>
+                  </div>
                 </div>
-
-                <div className="pt-2 border-t border-slate-200/60 text-[11px] font-mono text-slate-500 flex items-center justify-between">
-                  <span>
-                    {step.eventTimestamp
-                      ? new Date(step.eventTimestamp).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          timeZone: 'UTC',
-                        }) + ' UTC'
-                      : '00:00 UTC'}
-                  </span>
-                  <span className="text-xs text-slate-400 group-hover:text-[#2563EB] transition">
-                    →
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

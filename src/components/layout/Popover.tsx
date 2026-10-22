@@ -238,6 +238,7 @@ export const Popover: React.FC<PopoverProps> = ({
     const handleDocumentKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
+        e.stopPropagation();
         onClose(true);
         requestAnimationFrame(() => {
           triggerRef.current?.focus();
@@ -259,7 +260,7 @@ export const Popover: React.FC<PopoverProps> = ({
     document.addEventListener('touchstart', handlePointerDownOutside, {
       passive: true,
     });
-    document.addEventListener('keydown', handleDocumentKeyDown);
+    document.addEventListener('keydown', handleDocumentKeyDown, true);
 
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
@@ -279,7 +280,7 @@ export const Popover: React.FC<PopoverProps> = ({
       vv?.removeEventListener('scroll', scheduleUpdate);
       document.removeEventListener('mousedown', handlePointerDownOutside);
       document.removeEventListener('touchstart', handlePointerDownOutside);
-      document.removeEventListener('keydown', handleDocumentKeyDown);
+      document.removeEventListener('keydown', handleDocumentKeyDown, true);
       ro?.disconnect();
     };
   }, [id, isOpen, onClose, triggerRef, updatePosition]);
@@ -287,6 +288,8 @@ export const Popover: React.FC<PopoverProps> = ({
   if (!isOpen || typeof document === 'undefined') {
     return null;
   }
+
+  const isInsideModal = Boolean(triggerRef.current?.closest?.('[role="dialog"]'));
 
   return createPortal(
     <div
@@ -301,6 +304,9 @@ export const Popover: React.FC<PopoverProps> = ({
       onKeyDown={onKeyDown}
       style={{
         position: 'fixed',
+        zIndex: (isInsideModal
+          ? 'var(--z-modal-popover, 65)'
+          : 'var(--z-dropdown, 40)') as unknown as number,
         top: `${pos.top}px`,
         left: `${pos.left}px`,
         width: `${pos.width}px`,

@@ -15,6 +15,11 @@ import {
   X,
 } from 'lucide-react';
 import { DropletTabs, DropletTabItem } from './ui/DropletTabs';
+import { Modal } from './ui/Modal';
+import {
+  buildSanitizedReportFilename,
+  triggerSafeBlobDownload,
+} from '../lib/reportBuilder';
 
 interface TimelineReconstructionViewProps {
   activeCase?: ForensicCaseSummary;
@@ -41,8 +46,12 @@ const CANONICAL_TIMELINE_TITLES: Record<string, string> = {
 const getTimelineStepTitle = (
   idx: number,
   originalTitle: string,
-  evidenceCode?: string
+  evidenceCode?: string,
+  isPreloadedPhantomCase?: boolean
 ): string => {
+  if (!isPreloadedPhantomCase) {
+    return originalTitle;
+  }
   if (idx === 0) return 'Fake text message sent to victim';
   if (idx === 1) return 'Login details stolen';
   if (idx === 2) return 'Money transferred out ($4,850.00)';
@@ -53,7 +62,14 @@ const getTimelineStepTitle = (
   return originalTitle;
 };
 
-const getCanonicalEvidenceTag = (idx: number, evidenceCode?: string): string => {
+const getCanonicalEvidenceTag = (
+  idx: number,
+  evidenceCode?: string,
+  isPreloadedPhantomCase?: boolean
+): string => {
+  if (!isPreloadedPhantomCase) {
+    return evidenceCode || 'Unlinked';
+  }
   if (idx === 0) return 'EVD-001';
   if (idx === 1) return 'EVD-002';
   if (idx === 2) return 'EVD-003';
@@ -77,7 +93,7 @@ export const TimelineReconstructionView: React.FC<
   onSelectEvidence,
   onAddMilestone,
 }) => {
-  const [selectedEventIndex, setSelectedEventIndex] = useState<number>(2);
+  const [selectedEventIndex, setSelectedEventIndex] = useState<number>(0);
   const [eventFilter, setEventFilter] = useState<'ALL' | 'ATTENTION'>('ALL');
   const [showAddMilestone, setShowAddMilestone] = useState<boolean>(false);
 
@@ -90,27 +106,48 @@ export const TimelineReconstructionView: React.FC<
   const [milestoneSeverity, setMilestoneSeverity] = useState<string>('HIGH');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Sorted timeline items with original step index preserved
+  const isPreloadedPhantomCase =
+    !activeCase || activeCase.id === 'case-phantom-upi-01';
+
+  // Sorted timeline items: chronological by instant, undated items last
   const indexedTimeline = useMemo(() => {
-    const sorted = [...timeline].sort(
-      (a, b) =>
-        new Date(a.eventTimestamp).getTime() -
-        new Date(b.eventTimestamp).getTime()
-    );
+    const sorted = [...timeline].sort((a, b) => {
+      const hasA = !!(a.eventTimestamp && a.eventTimestamp.trim());
+      const hasB = !!(b.eventTimestamp && b.eventTimestamp.trim());
+      if (!hasA && !hasB) return 0;
+      if (!hasA) return 1;
+      if (!hasB) return -1;
+      const ta = new Date(a.eventTimestamp).getTime();
+      const tb = new Date(b.eventTimestamp).getTime();
+      if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+      if (Number.isNaN(ta)) return 1;
+      if (Number.isNaN(tb)) return -1;
+      return ta - tb;
+    });
     return sorted.map((item, idx) => ({
       item,
       stepNumber: idx + 1,
       stepIdx: idx,
-      isStep3OrAnomaly: idx === 2 || !!item.anomalyFlag,
-      evidenceTag: getCanonicalEvidenceTag(idx, item.evidenceCode),
-      plainTitle: getTimelineStepTitle(idx, item.title, item.evidenceCode),
+      isStep3OrAnomaly:
+        (isPreloadedPhantomCase && idx === 2) || !!item.anomalyFlag,
+      evidenceTag: getCanonicalEvidenceTag(
+        idx,
+        item.evidenceCode,
+        isPreloadedPhantomCase
+      ),
+      plainTitle: getTimelineStepTitle(
+        idx,
+        item.title,
+        item.evidenceCode,
+        isPreloadedPhantomCase
+      ),
     }));
-  }, [timeline]);
+  }, [timeline, isPreloadedPhantomCase]);
 
   const needsAttentionCount = useMemo(() => {
     const count = indexedTimeline.filter((x) => x.isStep3OrAnomaly).length;
-    return Math.max(1, count);
-  }, [indexedTimeline]);
+    return isPreloadedPhantomCase ? Math.max(1, count) : count;
+  }, [indexedTimeline, isPreloadedPhantomCase]);
 
   const filteredItems = useMemo(() => {
     if (eventFilter === 'ATTENTION') {
@@ -121,15 +158,40 @@ export const TimelineReconstructionView: React.FC<
 
   const filterTabs: DropletTabItem[] = useMemo(
     () => [
-      { id: 'ALL', label: `All steps (${indexedTimeline.length || 4})` },
+      {
+        id: 'ALL',
+        label: `All steps (${
+          isPreloadedPhantomCase
+            ? indexedTimeline.length || 4
+            : indexedTimeline.length
+        })`,
+      },
       { id: 'ATTENTION', label: `Needs attention (${needsAttentionCount})` },
     ],
-    [indexedTimeline.length, needsAttentionCount]
+    [indexedTimeline.length, needsAttentionCount, isPreloadedPhantomCase]
   );
 
   // Derived timing values (preserving underlying timestamps & values)
   const timelineStats = useMemo(() => {
-    if (indexedTimeline.length === 0) {
+    const datedEntries = indexedTimeline.filter(
+      (x) =>
+        x.item.eventTimestamp &&
+        !Number.isNaN(new Date(x.item.eventTimestamp).getTime())
+    );
+    if (datedEntries.length === 0) {
+      if (!isPreloadedPhantomCase) {
+        return {
+          start: 'Date not recorded',
+          end: 'Date not recorded',
+          duration: 'Not recorded',
+          smsToTransferMin: 0,
+          totalMin: 0,
+          hop1Delta: 'Not recorded',
+          hop2Delta: 'Not recorded',
+          hop3Delta: 'Not recorded',
+          exifSkew: 'Not recorded',
+        };
+      }
       return {
         start: '10:12:18 UTC',
         end: '10:39:12 UTC',
@@ -143,17 +205,17 @@ export const TimelineReconstructionView: React.FC<
       };
     }
 
-    const t0 = new Date(indexedTimeline[0].item.eventTimestamp).getTime();
-    const tLast = new Date(
-      indexedTimeline[indexedTimeline.length - 1].item.eventTimestamp
-    ).getTime();
-    const totalDwellMs = Math.max(1000, tLast - t0);
+    const firstDated = datedEntries[0].item.eventTimestamp;
+    const lastDated = datedEntries[datedEntries.length - 1].item.eventTimestamp;
+    const t0 = new Date(firstDated).getTime();
+    const tLast = new Date(lastDated).getTime();
+    const totalDwellMs = Math.max(0, tLast - t0);
 
-    const t1 = indexedTimeline[1]
-      ? new Date(indexedTimeline[1].item.eventTimestamp).getTime()
+    const t1 = datedEntries[1]
+      ? new Date(datedEntries[1].item.eventTimestamp).getTime()
       : t0;
-    const t2 = indexedTimeline[2]
-      ? new Date(indexedTimeline[2].item.eventTimestamp).getTime()
+    const t2 = datedEntries[2]
+      ? new Date(datedEntries[2].item.eventTimestamp).getTime()
       : t1;
 
     const hop1Ms = Math.max(0, t1 - t0);
@@ -161,23 +223,24 @@ export const TimelineReconstructionView: React.FC<
     const hop3Ms = Math.max(0, tLast - t2);
 
     const smsToTransferMs = hop1Ms + hop2Ms;
-    const smsToTransferMin = Math.max(
-      14,
-      Math.round(smsToTransferMs / 60000) || 16
-    );
-    const totalMin = Math.max(27, Math.round(totalDwellMs / 60000) || 27);
+    const smsToTransferMin = isPreloadedPhantomCase
+      ? Math.max(14, Math.round(smsToTransferMs / 60000) || 16)
+      : Math.round(smsToTransferMs / 60000);
+    const totalMin = isPreloadedPhantomCase
+      ? Math.max(27, Math.round(totalDwellMs / 60000) || 27)
+      : Math.round(totalDwellMs / 60000);
 
     const exifDateMs = new Date('2026-10-01T09:50:11Z').getTime();
     const netDateMs = t2 || new Date('2026-10-01T10:28:44Z').getTime();
     const exifDiffMs = Math.abs(netDateMs - exifDateMs);
 
     return {
-      start: indexedTimeline[0].item.eventTimestamp.slice(11, 19) + ' UTC',
-      end:
-        indexedTimeline[indexedTimeline.length - 1].item.eventTimestamp.slice(
-          11,
-          19
-        ) + ' UTC',
+      start: firstDated.slice(11, 19)
+        ? `${firstDated.slice(11, 19)} UTC`
+        : firstDated,
+      end: lastDated.slice(11, 19)
+        ? `${lastDated.slice(11, 19)} UTC`
+        : lastDated,
       duration: formatDelta(totalDwellMs),
       smsToTransferMin,
       totalMin,
@@ -186,13 +249,16 @@ export const TimelineReconstructionView: React.FC<
       hop3Delta: formatDelta(hop3Ms),
       exifSkew: formatDelta(exifDiffMs),
     };
-  }, [indexedTimeline]);
+  }, [indexedTimeline, isPreloadedPhantomCase]);
 
   const handleDownloadDataFile = () => {
+    const generatedAtUtc = new Date().toISOString();
     const payload = {
       caseNumber: activeCase?.caseNumber || 'CASE-2026-0841',
       title: activeCase?.title || 'Case Timeline',
+      generatedAtUtc,
       totalDuration: timelineStats.duration,
+      stepCount: indexedTimeline.length,
       steps: indexedTimeline.map((entry) => ({
         step: entry.stepNumber,
         evidenceTag: entry.evidenceTag,
@@ -206,16 +272,14 @@ export const TimelineReconstructionView: React.FC<
       })),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: 'application/json',
+      type: 'application/json;charset=utf-8',
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${activeCase?.caseNumber || 'case'}-timeline.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const filename = buildSanitizedReportFilename(
+      activeCase?.caseNumber || 'case',
+      generatedAtUtc,
+      'json'
+    );
+    triggerSafeBlobDownload(blob, filename);
   };
 
   return (
@@ -277,7 +341,12 @@ export const TimelineReconstructionView: React.FC<
             LEFT 8 COLUMNS: SIMPLE VERTICAL TIMELINE
             =================================================================== */}
         <div className="lg:col-span-8 space-y-0 min-w-0">
-          {filteredItems.map((entry, renderIdx) => {
+          {filteredItems.length === 0 ? (
+            <div className="cf-card p-6 text-xs sm:text-sm text-slate-600">
+              No timeline events recorded for this case yet. Click &ldquo;Add step&rdquo; above to add an event.
+            </div>
+          ) : (
+          filteredItems.map((entry, renderIdx) => {
             const {
               item: ev,
               stepNumber,
@@ -353,17 +422,21 @@ export const TimelineReconstructionView: React.FC<
                           {evidenceTag}
                         </span>
 
-                        {/* Inline "Photo was edited – check this" note on Step 3 */}
+                        {/* Inline anomaly warning note */}
                         {isStep3OrAnomaly && (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FEF3DF] text-[#9A5B13]">
                             <AlertTriangle className="w-3.5 h-3.5 text-[#D9822B] shrink-0" />
-                            <span>Photo was edited – check this</span>
+                            <span>{ev.anomalyReason || 'Photo was edited – check this'}</span>
                           </span>
                         )}
                       </div>
 
                       <span className="font-mono text-xs text-slate-500 tabular-nums shrink-0">
-                        {ev.eventTimestamp?.slice(11, 19) || '10:12:18'} UTC
+                        {ev.eventTimestamp && ev.eventTimestamp.trim()
+                          ? ev.eventTimestamp.slice(11, 19)
+                            ? `${ev.eventTimestamp.slice(11, 19)} UTC`
+                            : ev.eventTimestamp
+                          : 'Date not recorded'}
                       </span>
                     </div>
 
@@ -418,7 +491,8 @@ export const TimelineReconstructionView: React.FC<
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </div>
 
         {/* ===================================================================
@@ -524,125 +598,114 @@ export const TimelineReconstructionView: React.FC<
       </div>
 
       {/* ── Add Step Modal (Existing Milestone Modal) ───────────────────────── */}
-      {showAddMilestone && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="cf-card max-w-lg w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Plus className="w-5 h-5 text-blue-600" />
-                <h3 className="text-base font-bold text-slate-900">
-                  Add Timeline Step
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddMilestone(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* ── Add Step Modal (Portaled Modal) ───────────────────────── */}
+      <Modal
+        isOpen={showAddMilestone}
+        onClose={() => setShowAddMilestone(false)}
+        title="Add Timeline Step"
+        icon={<Plus className="w-5 h-5 text-blue-600" />}
+        maxWidthClass="max-w-lg"
+      >
+        <div className="space-y-4 pt-1">
+          <div className="space-y-3 text-xs">
+            <div>
+              <label className="block text-slate-700 font-semibold mb-1">
+                Step title
+              </label>
+              <input
+                type="text"
+                value={milestoneTitle}
+                onChange={(e) => setMilestoneTitle(e.target.value)}
+                placeholder="e.g. Secondary withdrawal at ATM"
+                className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
+              />
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Step title
-                </label>
-                <input
-                  type="text"
-                  value={milestoneTitle}
-                  onChange={(e) => setMilestoneTitle(e.target.value)}
-                  placeholder="e.g. Secondary withdrawal at ATM"
-                  className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  What happened
-                </label>
-                <textarea
-                  value={milestoneDesc}
-                  onChange={(e) => setMilestoneDesc(e.target.value)}
-                  rows={3}
-                  placeholder="Describe what happened at this step..."
-                  className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Stage of attack
-                  </label>
-                  <select
-                    value={milestonePhase}
-                    onChange={(e) => setMilestonePhase(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
-                  >
-                    <option value="RECON_AND_LURE">Initial message</option>
-                    <option value="CREDENTIAL_HARVEST">Login stolen</option>
-                    <option value="ACCOUNT_TAKEOVER">Account access</option>
-                    <option value="FINANCIAL_EXECUTION">Money transfer</option>
-                    <option value="CRYPTO_OFFRAMP">Cashout</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Risk level
-                  </label>
-                  <select
-                    value={milestoneSeverity}
-                    onChange={(e) => setMilestoneSeverity(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
-                  >
-                    <option value="CRITICAL">High risk</option>
-                    <option value="HIGH">Watch</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="LOW">Normal</option>
-                  </select>
-                </div>
-              </div>
+            <div>
+              <label className="block text-slate-700 font-semibold mb-1">
+                What happened
+              </label>
+              <textarea
+                value={milestoneDesc}
+                onChange={(e) => setMilestoneDesc(e.target.value)}
+                rows={3}
+                placeholder="Describe what happened at this step..."
+                className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
+              />
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowAddMilestone(false)}
-                className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!milestoneTitle.trim() || isSubmitting}
-                onClick={async () => {
-                  if (onAddMilestone && milestoneTitle.trim()) {
-                    setIsSubmitting(true);
-                    try {
-                      await onAddMilestone({
-                        title: milestoneTitle,
-                        description: milestoneDesc,
-                        killChainPhase: milestonePhase,
-                        severity: milestoneSeverity,
-                      });
-                      setShowAddMilestone(false);
-                      setMilestoneTitle('');
-                      setMilestoneDesc('');
-                    } finally {
-                      setIsSubmitting(false);
-                    }
-                  }
-                }}
-                className="cf-btn-blue px-4 py-2 text-xs font-semibold disabled:opacity-50 cursor-pointer"
-              >
-                {isSubmitting ? 'Saving…' : 'Save step'}
-              </button>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Stage of attack
+                </label>
+                <select
+                  value={milestonePhase}
+                  onChange={(e) => setMilestonePhase(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
+                >
+                  <option value="RECON_AND_LURE">Initial message</option>
+                  <option value="CREDENTIAL_HARVEST">Login stolen</option>
+                  <option value="ACCOUNT_TAKEOVER">Account access</option>
+                  <option value="FINANCIAL_EXECUTION">Money transfer</option>
+                  <option value="CRYPTO_OFFRAMP">Cashout</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Risk level
+                </label>
+                <select
+                  value={milestoneSeverity}
+                  onChange={(e) => setMilestoneSeverity(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-[#F6F8FC] border border-slate-200 text-slate-800"
+                >
+                  <option value="CRITICAL">High risk</option>
+                  <option value="HIGH">Watch</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Normal</option>
+                </select>
+              </div>
             </div>
           </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowAddMilestone(false)}
+              className="px-4 py-2 rounded-xl text-slate-600 text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!milestoneTitle.trim() || isSubmitting}
+              onClick={async () => {
+                if (onAddMilestone && milestoneTitle.trim()) {
+                  setIsSubmitting(true);
+                  try {
+                    await onAddMilestone({
+                      title: milestoneTitle,
+                      description: milestoneDesc,
+                      killChainPhase: milestonePhase,
+                      severity: milestoneSeverity,
+                    });
+                    setShowAddMilestone(false);
+                    setMilestoneTitle('');
+                    setMilestoneDesc('');
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }
+              }}
+              className="cf-btn-blue px-4 py-2 text-xs font-semibold disabled:opacity-50 cursor-pointer"
+            >
+              {isSubmitting ? 'Saving…' : 'Save step'}
+            </button>
+          </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

@@ -8,6 +8,7 @@ import {
   Fingerprint,
   Sparkles,
   RefreshCw,
+  CheckCircle2,
 } from 'lucide-react';
 import { DropletTabs } from '../ui/DropletTabs';
 
@@ -404,9 +405,9 @@ const CurvedTextBands: React.FC<{
    ========================================================================= */
 
 const LaserRing: React.FC<{
-  sweepTrigger: number;
+  sweepTrigger?: number;
   reducedMotion: boolean;
-}> = ({ sweepTrigger, reducedMotion }) => {
+}> = ({ sweepTrigger = 0, reducedMotion }) => {
   const laserGroupRef = useRef<THREE.Group>(null);
   const sweepStartTimeRef = useRef<number>(-999);
 
@@ -480,7 +481,7 @@ const Podium: React.FC = () => {
   }, [cylinderGeo, edgeTorusGeo]);
 
   return (
-    <group position={[0, -1.45, 0]}>
+    <group position={[0, -1.36, 0]}>
       <mesh geometry={cylinderGeo}>
         <meshStandardMaterial
           color="#DCE6F5"
@@ -515,15 +516,15 @@ const CrystalPrism: React.FC = () => {
       <mesh geometry={crystalGeo}>
         <meshPhysicalMaterial
           color="#ffffff"
-          transmission={0.92}
-          thickness={1.4}
+          transmission={0.96}
+          thickness={1.22}
           ior={1.55}
           roughness={0.05}
           metalness={0}
           clearcoat={1}
           clearcoatRoughness={0.05}
           attenuationColor="#dbeafe"
-          attenuationDistance={3.5}
+          attenuationDistance={3.9}
           envMapIntensity={1.1}
           side={THREE.DoubleSide}
           depthWrite={false}
@@ -546,16 +547,12 @@ const CrystalPrism: React.FC = () => {
    ========================================================================= */
 
 interface PrismSceneProps {
-  selectedArtifact: ArtifactType;
-  sweepTrigger: number;
   reducedMotion: boolean;
   isDraggingRef: React.MutableRefObject<boolean>;
   targetRotRef: React.MutableRefObject<{ x: number; y: number }>;
 }
 
 const PrismScene: React.FC<PrismSceneProps> = ({
-  selectedArtifact,
-  sweepTrigger,
   reducedMotion,
   isDraggingRef,
   targetRotRef,
@@ -563,10 +560,21 @@ const PrismScene: React.FC<PrismSceneProps> = ({
   useStudioEnv();
   useSceneBackground();
 
+  const { camera, size } = useThree();
   const crystalRotGroupRef = useRef<THREE.Group>(null);
   const currentRotRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useFrame((_, delta) => {
+    // Frame crystal so projected bounds fill ~45%–49% (target 42%–50%) of usable card height
+    // with generous top/bottom/side margins across full 360-degree rotation on desktop & mobile.
+    const aspect = size.width / Math.max(1, size.height);
+    const camZ = aspect < 1.05 ? 6.5 / Math.max(0.78, aspect * 0.95) : 6.5;
+    if (Math.abs(camera.position.z - camZ) > 0.01 || Math.abs(camera.position.y - 0.02) > 0.01) {
+      camera.position.set(0, 0.02, camZ);
+      camera.lookAt(0, -0.04, 0);
+      camera.updateProjectionMatrix();
+    }
+
     if (!crystalRotGroupRef.current) return;
 
     if (!reducedMotion && !isDraggingRef.current) {
@@ -594,55 +602,217 @@ const PrismScene: React.FC<PrismSceneProps> = ({
       <directionalLight position={[4, 8, 4]} intensity={1.8} color="#ffffff" />
       <directionalLight position={[-4, -3, -4]} intensity={0.8} color="#93c5fd" />
 
-      <group ref={crystalRotGroupRef} position={[0, 0, 0]}>
+      <group ref={crystalRotGroupRef} position={[0, 0.08, 0]} scale={0.82}>
         <InternalCore reducedMotion={reducedMotion} />
-        <CurvedTextBands
-          selectedArtifact={selectedArtifact}
-          reducedMotion={reducedMotion}
-        />
         <CrystalPrism />
       </group>
 
-      <LaserRing sweepTrigger={sweepTrigger} reducedMotion={reducedMotion} />
-      <Podium />
+      <group position={[0, 0.08, 0]} scale={0.82}>
+        <LaserRing reducedMotion={reducedMotion} />
+      </group>
+      <group position={[0, 0.08, 0]} scale={0.82}>
+        <Podium />
+      </group>
     </>
   );
 };
 
 /* =========================================================================
-   10. Static CSS/SVG Fallback Component (Light Card)
+   10. Repeating Scanning -> Ready Status Line below Crystal (E2)
    ========================================================================= */
 
-interface FallbackProps {
-  selectedArtifact: ArtifactType;
-  onSelectArtifact: (type: ArtifactType) => void;
-  isAuditing: boolean;
-  onRunAudit: () => void;
-}
+// Illustrative constant for the homepage hero card status sequence.
+// Uses truthful completed wording "Fingerprint ready" rather than "Fingerprint verified".
+const ILLUSTRATIVE_FINGERPRINT_SAMPLE = '8f4b1029c3d4e8a1';
 
-export const EvidencePrismFallback: React.FC<FallbackProps> = ({
-  selectedArtifact,
-  onSelectArtifact,
-}) => {
-  const meta = ARTIFACT_INFO[selectedArtifact];
+export const ScanningStatusLine: React.FC<{
+  reducedMotion: boolean;
+  isReady?: boolean;
+}> = ({ reducedMotion, isReady = true }) => {
+  const [phase, setPhase] = useState<'scanning' | 'ready'>(() =>
+    reducedMotion ? 'ready' : 'scanning'
+  );
+  const [tabVisible, setTabVisible] = useState<boolean>(() =>
+    typeof document !== 'undefined' ? document.visibilityState === 'visible' : true
+  );
+  const hexSpanRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const onVisChange = () => {
+      setTabVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      setPhase('ready');
+      if (hexSpanRef.current) {
+        hexSpanRef.current.textContent = ILLUSTRATIVE_FINGERPRINT_SAMPLE;
+      }
+      return;
+    }
+
+    if (!isReady || !tabVisible) {
+      return;
+    }
+
+    let cancelled = false;
+    let scrambleIntervalId: number | null = null;
+    let phaseTimeoutId: number | null = null;
+
+    const clearTimers = () => {
+      if (scrambleIntervalId !== null) {
+        window.clearInterval(scrambleIntervalId);
+        scrambleIntervalId = null;
+      }
+      if (phaseTimeoutId !== null) {
+        window.clearTimeout(phaseTimeoutId);
+        phaseTimeoutId = null;
+      }
+    };
+
+    const startScanningPhase = () => {
+      if (cancelled) return;
+      clearTimers();
+      setPhase('scanning');
+      if (hexSpanRef.current) {
+        hexSpanRef.current.textContent = ILLUSTRATIVE_FINGERPRINT_SAMPLE;
+      }
+
+      // Update hex text at ~10.5 Hz (within 8-12 Hz) via DOM ref without calling React setState per frame
+      scrambleIntervalId = window.setInterval(() => {
+        if (!hexSpanRef.current) return;
+        const p1 = Math.floor(Math.random() * 0xffffffff)
+          .toString(16)
+          .padStart(8, '0');
+        const p2 = Math.floor(Math.random() * 0xffffffff)
+          .toString(16)
+          .padStart(8, '0');
+        hexSpanRef.current.textContent = `${p1}${p2}`;
+      }, 95);
+
+      // Hold scanning phase for 3.0s (2.5-3.2s), then cross-fade to ready
+      phaseTimeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        if (scrambleIntervalId !== null) {
+          window.clearInterval(scrambleIntervalId);
+          scrambleIntervalId = null;
+        }
+        if (hexSpanRef.current) {
+          hexSpanRef.current.textContent = ILLUSTRATIVE_FINGERPRINT_SAMPLE;
+        }
+        setPhase('ready');
+
+        // Hold ready phase for 1.8s (1.5-2.0s), then repeat cleanly
+        phaseTimeoutId = window.setTimeout(() => {
+          if (!cancelled) {
+            startScanningPhase();
+          }
+        }, 1800);
+      }, 3000);
+    };
+
+    startScanningPhase();
+
+    return () => {
+      cancelled = true;
+      clearTimers();
+    };
+  }, [reducedMotion, isReady, tabVisible]);
+
+  const isReadyState = reducedMotion || phase === 'ready';
 
   return (
-    <div className="cf-card w-full h-full min-h-[440px] flex flex-col justify-between p-6 rounded-2xl text-slate-900">
-      <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-600" />
-          <span className="text-sm font-semibold text-slate-900">
-            Evidence verification preview
+    <div className="relative z-10 h-11 min-h-[44px] px-4 bg-white/95 border-t border-slate-200/80 flex items-center justify-center gap-2.5 text-xs select-none shrink-0">
+      <span className="sr-only">Illustrative SHA-256 fingerprint preview</span>
+
+      {/* Stacked fixed-width/height state labels so cross-fade never changes layout height or shifts siblings */}
+      <div className="relative grid items-center justify-items-start min-w-[216px] h-5">
+        <span
+          aria-hidden={isReadyState ? 'true' : undefined}
+          className={`col-start-1 row-start-1 inline-flex items-center gap-2 transition-opacity duration-300 ${
+            isReadyState ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <span
+            className="w-2 h-2 rounded-full bg-blue-600 animate-pulse shrink-0"
+            aria-hidden="true"
+          />
+          <span className="font-sans font-medium text-slate-600 whitespace-nowrap">
+            Scanning SHA-256 fingerprint…
           </span>
-        </div>
-        <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-700">
-          {meta.tag}
+        </span>
+
+        <span
+          aria-hidden={!isReadyState ? 'true' : undefined}
+          className={`col-start-1 row-start-1 inline-flex items-center gap-1.5 transition-opacity duration-300 ${
+            isReadyState ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <CheckCircle2
+            className="w-3.5 h-3.5 text-emerald-600 shrink-0"
+            aria-hidden="true"
+          />
+          <span className="font-sans font-semibold text-emerald-700 whitespace-nowrap">
+            Fingerprint ready
+          </span>
         </span>
       </div>
 
-      <div className="relative py-8 flex flex-col items-center justify-center bg-[#F6F8FC] rounded-xl my-3 border border-slate-200/80">
+      <span
+        ref={hexSpanRef}
+        aria-hidden="true"
+        className={`font-mono font-semibold tracking-wider tabular-nums inline-block w-[16ch] text-center transition-colors duration-300 ${
+          isReadyState ? 'text-slate-500' : 'text-blue-700'
+        }`}
+      >
+        {ILLUSTRATIVE_FINGERPRINT_SAMPLE}
+      </span>
+    </div>
+  );
+};
+
+/* =========================================================================
+   11. Static CSS/SVG Fallback Component (Calm Light Card)
+   ========================================================================= */
+
+export const EvidencePrismFallback: React.FC<{ reducedMotion?: boolean }> = ({
+  reducedMotion = false,
+}) => {
+  return (
+    <div
+      className="cf-card relative w-full h-full min-h-[460px] flex flex-col justify-between rounded-[20px] overflow-hidden text-slate-900 bg-white"
+      style={{
+        boxShadow:
+          '0 1px 2px rgba(15,23,42,0.06), 0 12px 28px -10px rgba(37,99,235,0.12), inset 0 1px 0 rgba(255,255,255,0.92)',
+      }}
+    >
+      <div className="relative flex-1 h-[416px] flex flex-col items-center justify-center p-6 bg-gradient-to-b from-[#F6F8FC] to-[#EAF0FA]">
+        {/* E1(a): Subtle cool-blue radial light behind the prism (peak alpha <= 0.18) */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(circle at 50% 44%, rgba(59,130,246,0.16) 0%, rgba(147,197,253,0.08) 42%, rgba(234,240,250,0) 72%)',
+          }}
+        />
+        {/* E1(b): Soft grounding shadow ellipse beneath the prism */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 bottom-9 -translate-x-1/2 w-56 h-7 rounded-full"
+          style={{
+            background:
+              'radial-gradient(ellipse at center, rgba(30,58,138,0.16) 0%, rgba(37,99,235,0.06) 55%, rgba(37,99,235,0) 80%)',
+            filter: 'blur(6px)',
+          }}
+        />
         <svg
-          className="w-44 h-44 text-blue-600"
+          className="relative z-10 w-56 h-56 text-blue-600/90 drop-shadow-sm"
           viewBox="0 0 200 200"
           fill="none"
           stroke="currentColor"
@@ -657,74 +827,29 @@ export const EvidencePrismFallback: React.FC<FallbackProps> = ({
           />
           <ellipse cx="100" cy="100" rx="85" ry="16" strokeWidth="1.5" />
         </svg>
-
-        <div className="mt-3 px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-700 text-xs font-mono">
-          {meta.technicalCode}
-        </div>
       </div>
 
-      <div className="py-1">
-        <DropletTabs
-          variant="compact"
-          ariaLabel="Evidence verification modes"
-          idPrefix="prism"
-          value={selectedArtifact}
-          onChange={(id) => onSelectArtifact(id as ArtifactType)}
-          items={[
-            {
-              id: 'WORM_SEAL',
-              label: ARTIFACT_INFO.WORM_SEAL.label,
-              icon: Lock,
-            },
-            {
-              id: 'MULE_NODE',
-              label: ARTIFACT_INFO.MULE_NODE.label,
-              icon: Network,
-            },
-            {
-              id: 'TIMESTAMP_VERIFY',
-              label: ARTIFACT_INFO.TIMESTAMP_VERIFY.label,
-              icon: Clock,
-            },
-          ]}
-        />
-      </div>
-
-      <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200 space-y-1.5 mt-2">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-semibold text-slate-900">{meta.label}</span>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${meta.badgeColor}`}>
-            {meta.status}
-          </span>
-        </div>
-        <p className="text-xs text-slate-600 leading-relaxed">
-          {meta.fullDesc}
-        </p>
-      </div>
+      <ScanningStatusLine reducedMotion={reducedMotion} isReady={true} />
     </div>
   );
 };
 
 /* =========================================================================
-   11. Exported Main EvidencePrism3D Component (Calm Light Card)
+   12. Exported Main EvidencePrism3D Component (Calm Light Card)
    ========================================================================= */
 
-interface EvidencePrism3DProps {
-  onRunGlobalVerify: () => void;
+export interface EvidencePrism3DProps {
+  onRunGlobalVerify?: () => void;
   className?: string;
 }
 
 export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
-  onRunGlobalVerify,
   className = '',
 }) => {
-  const [selectedArtifact, setSelectedArtifact] = useState<ArtifactType>('WORM_SEAL');
-  const [isAuditing, setIsAuditing] = useState<boolean>(false);
-  const [auditMessage, setAuditMessage] = useState<string | null>(null);
   const [webglSupported, setWebglSupported] = useState<boolean>(true);
   const [reducedMotion, setReducedMotion] = useState<boolean>(false);
   const [isVisible, setIsVisible] = useState<boolean>(true);
-  const [sweepTrigger, setSweepTrigger] = useState<number>(0);
+  const [sceneReady, setSceneReady] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef<boolean>(false);
@@ -764,12 +889,14 @@ export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
     };
   }, []);
 
-  const handleCreated = useCallback(({ gl }: { gl: THREE.WebGLRenderer }) => {
+  const handleCreated = useCallback(({ gl, camera }: { gl: THREE.WebGLRenderer; camera: THREE.Camera }) => {
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.toneMappingExposure = 1.05;
     if ('transmissionResolutionScale' in gl) {
       gl.transmissionResolutionScale = 0.75;
     }
+    camera.lookAt(0, -0.04, 0);
+    setSceneReady(true);
     const dom = gl.domElement;
     const onContextLost = (e: Event) => {
       e.preventDefault();
@@ -800,81 +927,58 @@ export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
     isDraggingRef.current = false;
   };
 
-  const handleSelectArtifact = (type: ArtifactType) => {
-    setSelectedArtifact(type);
-    setSweepTrigger((prev) => prev + 1);
-  };
-
-  const handleAuditTrigger = () => {
-    setIsAuditing(true);
-    setSweepTrigger((prev) => prev + 1);
-    setAuditMessage('Checking every file fingerprint in the case...');
-
-    try {
-      onRunGlobalVerify();
-    } catch (err) {
-      console.error('Audit execution error:', err);
-    }
-
-    setTimeout(() => {
-      setIsAuditing(false);
-      setAuditMessage('All files verified — no changes detected.');
-      setTimeout(() => setAuditMessage(null), 4000);
-    }, 2000);
-  };
-
-  const activeMeta = ARTIFACT_INFO[selectedArtifact];
-
   if (!webglSupported) {
-    return (
-      <EvidencePrismFallback
-        selectedArtifact={selectedArtifact}
-        onSelectArtifact={handleSelectArtifact}
-        isAuditing={isAuditing}
-        onRunAudit={handleAuditTrigger}
-      />
-    );
+    return <EvidencePrismFallback reducedMotion={reducedMotion} />;
   }
 
   return (
     <div
       ref={containerRef}
-      className={`cf-card relative rounded-[20px] overflow-hidden flex flex-col justify-between text-slate-900 ${className}`}
-      style={{ minHeight: '440px' }}
+      className={`cf-card relative rounded-[20px] overflow-hidden flex flex-col justify-between text-slate-900 bg-white border border-slate-200/80 ${className}`.trim()}
+      style={{
+        minHeight: '460px',
+        boxShadow:
+          '0 1px 2px rgba(15,23,42,0.06), 0 12px 28px -10px rgba(37,99,235,0.12), inset 0 1px 0 rgba(255,255,255,0.92)',
+      }}
     >
-      {/* Stage Header */}
-      <div className="relative z-10 px-5 pt-4 pb-3 border-b border-slate-200 flex items-center justify-between gap-3 bg-white">
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isAuditing ? 'bg-blue-600' : 'bg-emerald-600'
-            }`}
-          />
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-900">
-              How evidence stays protected
-            </span>
-            <span className="text-xs text-slate-500">
-              Drag to rotate · Click a tab below to inspect
-            </span>
-          </div>
-        </div>
-
-        <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700">
-          {activeMeta.tag}
-        </span>
-      </div>
+      {/* E1(c): Subtle top-edge inner highlight */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/95 z-20"
+      />
 
       {/* 3D WebGL Canvas Stage */}
       <div
-        className="relative w-full h-[300px] sm:h-[320px] overflow-hidden select-none cursor-grab active:cursor-grabbing bg-gradient-to-b from-[#F6F8FC] to-[#EAF0FA]"
+        className="relative w-full h-[380px] sm:h-[416px] overflow-hidden select-none cursor-grab active:cursor-grabbing bg-gradient-to-b from-[#F6F8FC] to-[#EAF0FA]"
+        style={{ touchAction: 'pan-y' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
       >
+        {/* E1(a): Subtle cool-blue radial light behind/over the prism stage (peak alpha <= 0.18) */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-10"
+          style={{
+            background:
+              'radial-gradient(circle at 50% 42%, rgba(59,130,246,0.14) 0%, rgba(147,197,253,0.06) 44%, rgba(234,240,250,0) 74%)',
+          }}
+        />
+
+        {/* E1(b): Soft grounding shadow ellipse beneath the prism */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 bottom-6 -translate-x-1/2 w-60 h-7 rounded-full z-10"
+          style={{
+            background:
+              'radial-gradient(ellipse at center, rgba(30,58,138,0.15) 0%, rgba(37,99,235,0.05) 56%, rgba(37,99,235,0) 82%)',
+            filter: 'blur(5px)',
+          }}
+        />
+
         <Canvas
-          camera={{ position: [0, 0.35, 5.2], fov: 36 }}
+          camera={{ position: [0, 0.02, 6.5], fov: 35 }}
           dpr={[1, 1.75]}
           frameloop={isVisible ? 'always' : 'never'}
           gl={{
@@ -887,8 +991,6 @@ export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
           className="w-full h-full"
         >
           <PrismScene
-            selectedArtifact={selectedArtifact}
-            sweepTrigger={sweepTrigger}
             reducedMotion={reducedMotion}
             isDraggingRef={isDraggingRef}
             targetRotRef={targetRotRef}
@@ -896,77 +998,12 @@ export const EvidencePrism3D: React.FC<EvidencePrism3DProps> = ({
         </Canvas>
       </div>
 
-      {/* HTML Artifact Selection Controls & Detail Panel */}
-      <div className="relative z-10 p-4 sm:p-5 bg-white border-t border-slate-200 space-y-3">
-        <DropletTabs
-          variant="compact"
-          ariaLabel="Evidence protection modes"
-          idPrefix="prism"
-          value={selectedArtifact}
-          onChange={(id) => handleSelectArtifact(id as ArtifactType)}
-          items={[
-            {
-              id: 'WORM_SEAL',
-              label: ARTIFACT_INFO.WORM_SEAL.label,
-              icon: Lock,
-            },
-            {
-              id: 'MULE_NODE',
-              label: ARTIFACT_INFO.MULE_NODE.label,
-              icon: Network,
-            },
-            {
-              id: 'TIMESTAMP_VERIFY',
-              label: ARTIFACT_INFO.TIMESTAMP_VERIFY.label,
-              icon: Clock,
-            },
-          ]}
-        />
-
-        {/* Selected Artifact Detail Panel */}
-        <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200 space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-mono font-semibold text-slate-800">
-              {activeMeta.technicalCode}
-            </span>
-            <span
-              className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${activeMeta.badgeColor}`}
-            >
-              {activeMeta.status}
-            </span>
-          </div>
-
-          <p className="text-[13px] text-slate-600 leading-relaxed">
-            {activeMeta.fullDesc}
-          </p>
-        </div>
-
-        {auditMessage && (
-          <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-            <span className="font-medium">{auditMessage}</span>
-          </div>
-        )}
-
-        <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
-          <div className="text-xs text-slate-500 flex items-center gap-1.5">
-            <Fingerprint className="w-3.5 h-3.5 text-blue-600" />
-            <span>Interactive 3D evidence preview</span>
-          </div>
-
-          <button
-            onClick={handleAuditTrigger}
-            disabled={isAuditing}
-            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isAuditing ? 'animate-spin' : ''}`} />
-            <span>{isAuditing ? 'Checking files...' : 'Verify all files'}</span>
-          </button>
-        </div>
-      </div>
+      {/* Restrained single repeating status line below crystal */}
+      <ScanningStatusLine reducedMotion={reducedMotion} isReady={sceneReady && isVisible} />
     </div>
   );
 };
 
 export default EvidencePrism3D;
+
 

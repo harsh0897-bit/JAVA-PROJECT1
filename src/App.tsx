@@ -27,6 +27,8 @@ import { IntegrityLedgerView } from './components/IntegrityLedgerView';
 import { ForensicReportView } from './components/ForensicReportView';
 import { WorkspaceHeader } from './components/layout/WorkspaceHeader';
 import { InvestigationStepper } from './components/layout/InvestigationStepper';
+import { Modal } from './components/ui/Modal';
+import { NewCaseWizardModal } from './components/NewCaseWizardModal';
 
 export type AppStage = 'HOME' | 'AUTH' | 'WORKSPACE';
 export type TabType = WorkspaceTabType;
@@ -34,7 +36,7 @@ export type TabType = WorkspaceTabType;
 export function App() {
   // 3-Stage Sequenced User Flow:
   // 1. HOME (Standalone Project Home Page at start of website)
-  // 2. AUTH (Login / Sign Up / Demo Users Portal accessible from Home Page)
+  // 2. AUTH (Login / Sign Up / Investigator Portal accessible from Home Page)
   // 3. WORKSPACE (Authenticated Sequenced Forensic Investigation Workspace)
   const [appStage, setAppStage] = useState<AppStage>('HOME');
   const [authInitialMode, setAuthInitialMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
@@ -73,11 +75,7 @@ export function App() {
     'Java 21 Virtual Threads & SSE Active'
   );
   const [showNewCaseModal, setShowNewCaseModal] = useState(false);
-  const [newCaseTitle, setNewCaseTitle] = useState('');
-  const [newCaseType, setNewCaseType] = useState('UPI_WIRE_FRAUD');
-  const [newCaseVictim, setNewCaseVictim] = useState('');
-  const [newCaseLoss, setNewCaseLoss] = useState('12500');
-  const [newCaseSummary, setNewCaseSummary] = useState('');
+  const [caseModalMode, setCaseModalMode] = useState<'CREATE' | 'EDIT'>('CREATE');
 
   // Global Cmd+K Search State
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -131,6 +129,17 @@ export function App() {
       ro?.disconnect();
     };
   }, [appStage, isAuthenticated]);
+
+  // F2: Scroll the workspace scroll container to the top of the new stage (below sticky header) on stage change
+  const prevTabRef = useRef<TabType>(activeTab);
+  useEffect(() => {
+    if (prevTabRef.current !== activeTab) {
+      prevTabRef.current = activeTab;
+      if (appStage === 'WORKSPACE' && isAuthenticated && window.scrollY > 0) {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    }
+  }, [activeTab, appStage, isAuthenticated]);
 
   const showToast = useCallback(
     (text: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -385,36 +394,55 @@ export function App() {
       setActiveCaseId('case-phantom-upi-01');
       await loadCaseWorkspaceData('case-phantom-upi-01');
       showToast(
-        'Demo Environment Reset: Restored clean baseline cases, WORM vault binaries, and entity graph!',
+        'Workspace Reset: Restored pre-loaded cases, WORM vault binaries, and entity graph!',
         'success'
       );
     }
   };
 
-  const handleCreateNewCase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await fetch('/api/v1/cases', {
-      method: 'POST',
+  const handleSubmitCaseWizard = async (payload: any) => {
+    const isEdit = caseModalMode === 'EDIT' && activeCase;
+    const url = isEdit
+      ? `/api/v1/cases/${encodeURIComponent(activeCase.id)}`
+      : '/api/v1/cases';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        title: newCaseTitle,
-        incidentType: newCaseType,
-        victimName: newCaseVictim || 'Corporate Account Holder',
-        estimatedLossUsd: parseFloat(newCaseLoss || '0'),
-        summary: newCaseSummary,
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.error || 'Failed to create case', 'error');
-      return;
+      showToast(data.error || 'Failed to save case', 'error');
+      throw new Error(data.error || 'Failed to save case');
     }
-    setShowNewCaseModal(false);
-    setNewCaseTitle('');
-    setNewCaseSummary('');
-    setActiveCaseId(data.id);
-    await loadCaseWorkspaceData(data.id);
-    showToast(`Created Investigation ${data.caseNumber}`, 'success');
+    const targetId = data.id || activeCaseId;
+    setActiveCaseId(targetId);
+    await loadCaseWorkspaceData(targetId);
+    if (!isEdit) {
+      setActiveTab('OVERVIEW');
+      showToast(`Case created (${data.caseNumber})`, 'success');
+    } else {
+      showToast(`Case updated (${data.caseNumber || activeCase?.caseNumber})`, 'success');
+    }
+  };
+
+  const handleDeleteCase = async (caseId: string) => {
+    const res = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Could not delete case', 'error');
+      throw new Error(data.error || 'Could not delete case');
+    }
+    const nextCaseId = 'case-phantom-upi-01';
+    setActiveCaseId(nextCaseId);
+    await loadCaseWorkspaceData(nextCaseId);
+    setActiveTab('OVERVIEW');
+    showToast('Deleted case from workspace', 'info');
   };
 
   const handleUploadFile = async (
@@ -652,7 +680,7 @@ export function App() {
     return (
       <>
         {toastMessage && (
-          <div className="fixed bottom-5 right-5 z-50 max-w-md bg-cfx-surface-elevated border border-cfx-border rounded-2xl shadow-cfx-elevated p-4 flex items-start gap-3 text-cfx-text-primary">
+          <div className="fixed bottom-5 right-5 z-[70] max-w-md bg-cfx-surface-elevated border border-cfx-border rounded-2xl shadow-cfx-elevated p-4 flex items-start gap-3 text-cfx-text-primary">
             {toastMessage.type === 'error' ? (
               <AlertTriangle className="w-5 h-5 text-cfx-danger shrink-0 mt-0.5" />
             ) : (
@@ -726,7 +754,7 @@ export function App() {
     );
   }
   return (
-    <div className="min-h-screen text-cfx-text-primary flex flex-col font-sans">
+    <div className="min-h-screen min-h-[100dvh] text-cfx-text-primary flex flex-col font-sans">
       {/* 1px IntersectionObserver sentinel above the sticky glass shell */}
       <div
         ref={sentinelRef}
@@ -734,11 +762,11 @@ export function App() {
         className="h-px w-full pointer-events-none"
       />
 
-      {/* Single Sticky Glass Shell (Header + Stepper) */}
+      {/* Single Sticky Glass Shell (Header + Stepper: z-30, below popovers z-40 and modals z-60) */}
       <div
         ref={shellRef}
         data-scrolled={isShellScrolled ? 'true' : 'false'}
-        className="sticky top-3 z-40 mx-auto w-full max-w-[1680px] px-3 sm:px-6"
+        className="sticky top-0 z-30 mx-auto w-full max-w-[1680px] px-3 sm:px-6 pt-2 pb-1"
       >
         <div className="cf-liquid-shell rounded-[32px] p-3 flex flex-col gap-2.5">
           <WorkspaceHeader
@@ -746,7 +774,10 @@ export function App() {
             cases={cases}
             activeCaseId={activeCaseId}
             onSelectCase={handleSwitchCase}
-            onOpenNewCaseModal={() => setShowNewCaseModal(true)}
+            onOpenNewCaseModal={() => {
+              setCaseModalMode('CREATE');
+              setShowNewCaseModal(true);
+            }}
             onReanalyzeCase={handleReanalyzeCase}
             onResetDemo={handleResetDemo}
             onOpenSearchModal={() => setShowSearchModal(true)}
@@ -772,7 +803,7 @@ export function App() {
 
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-cfx-surface border border-cfx-border rounded-2xl shadow-cfx-elevated p-4 flex items-start gap-3 text-cfx-text-primary">
+        <div className="fixed bottom-5 right-5 z-[70] max-w-md bg-cfx-surface border border-cfx-border rounded-2xl shadow-cfx-elevated p-4 flex items-start gap-3 text-cfx-text-primary">
           {toastMessage.type === 'error' ? (
             <AlertTriangle className="w-5 h-5 text-cfx-danger shrink-0 mt-0.5" />
           ) : (
@@ -792,13 +823,13 @@ export function App() {
       )}
 
       {/* Level 3: Current Investigation Stage (Cleanly rendered below shell) */}
-      <main className="relative mx-auto w-full max-w-[1680px] px-3 sm:px-6 pt-5 pb-12 flex-1 min-w-0">
+      <main className="relative mx-auto w-full max-w-[1680px] px-3 sm:px-6 pt-4 pb-12 flex-1 min-w-0">
         <div
           key={activeTab}
           id={`panel-${activeTab}`}
           role="tabpanel"
           aria-labelledby={`tab-${activeTab}`}
-          className="stage-enter min-w-0"
+          className="stage-enter min-w-0 scroll-mt-[var(--shell-h,148px)]"
         >
 
         {activeTab === 'OVERVIEW' && activeCase && (
@@ -812,6 +843,10 @@ export function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSelectEntityForGraph={(id) => setSelectedEntityId(id)}
             onSelectEvidenceForVault={(id) => setSelectedEvidenceId(id)}
+            onEditCase={() => {
+              setCaseModalMode('EDIT');
+              setShowNewCaseModal(true);
+            }}
           />
         )}
 
@@ -833,6 +868,8 @@ export function App() {
 
         {activeTab === 'GRAPH' && (
           <IncidentGraphView
+            activeCase={activeCase || undefined}
+            evidenceList={evidenceList}
             entities={entities}
             relationships={relationships}
             selectedEntityId={selectedEntityId}
@@ -874,234 +911,132 @@ export function App() {
         )}
 
         {activeTab === 'REPORT' && activeCase && (
-          <ForensicReportView activeCase={activeCase} />
+          <ForensicReportView
+            activeCase={activeCase}
+            evidenceList={evidenceList}
+            entities={entities}
+            relationships={relationships}
+            timeline={timeline}
+            verifications={verifications}
+            ledger={ledger}
+            chainVerification={chainVerification}
+            currentUser={currentUser}
+          />
         )}
         </div>
       </main>
 
-      {/* Global Search Modal (Cmd+K) */}
-      {showSearchModal && (
-        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-md flex items-start justify-center pt-20 px-4">
-          <div className="cf-glass-panel border border-white/90 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden text-[#202733]">
-            <div className="p-4 border-b border-slate-200/60 flex items-center gap-3 bg-white/60 backdrop-blur-xs">
-              <Search className="w-5 h-5 text-[#2563EB]" />
-              <input
-                type="text"
-                autoFocus
-                value={globalSearchQuery}
-                onChange={(e) => setGlobalSearchQuery(e.target.value)}
-                placeholder="Search across all cases: phone numbers, UPI IDs, SHA-256 hashes, wallets..."
-                className="flex-1 text-sm bg-transparent text-[#202733] placeholder-[#8492A6] focus:outline-none font-medium"
-              />
-              <button
-                onClick={() => setShowSearchModal(false)}
-                className="text-[#8492A6] hover:text-[#202733] transition p-1 rounded-lg hover:bg-white/80"
-                aria-label="Close search"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Global Search Modal (Cmd+K) — Portaled via Modal */}
+      <Modal
+        isOpen={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        title="Global Forensic Repository Search"
+        maxWidthClass="max-w-2xl"
+      >
+        <div className="space-y-4 text-[#202733]">
+          <div className="p-3 rounded-xl border border-slate-200/80 flex items-center gap-3 bg-[#F6F8FC]">
+            <Search className="w-5 h-5 text-[#2563EB] shrink-0" />
+            <input
+              type="text"
+              autoFocus
+              value={globalSearchQuery}
+              onChange={(e) => setGlobalSearchQuery(e.target.value)}
+              placeholder="Search across all cases: phone numbers, UPI IDs, SHA-256 hashes, wallets..."
+              className="flex-1 text-sm bg-transparent text-[#202733] placeholder-[#8492A6] focus:outline-none font-medium"
+            />
+          </div>
 
-            <div className="p-4 max-h-96 overflow-y-auto space-y-4">
-              {!globalSearchResults ? (
-                <div className="text-xs text-[#8492A6] text-center py-6">
-                  Type any entity name, phone number, wallet, or SHA-256 prefix to search across the entire forensic repository.
-                </div>
-              ) : (
-                <>
-                  {globalSearchResults.entities?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#8492A6]">
-                        Matching Entities ({globalSearchResults.entities.length})
-                      </div>
-                      {globalSearchResults.entities.map(
-                        (ent: ExtractedEntity) => (
-                          <div
-                            key={ent.id}
-                            onClick={() => {
-                              setSelectedEntityId(ent.id);
-                              setActiveTab('GRAPH');
-                              setShowSearchModal(false);
-                            }}
-                            className="p-3 rounded-xl bg-white/70 hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
-                          >
-                            <div>
-                              <span className="font-semibold text-[#202733]">
-                                {ent.displayLabel}
-                              </span>
-                              <span className="ml-2 font-mono text-[11px] text-[#8492A6]">
-                                ({ent.entityType})
-                              </span>
-                            </div>
-                            <span className="text-[#2563EB] font-semibold">
-                              Inspect Graph →
-                            </span>
-                          </div>
-                        )
-                      )}
+          <div className="space-y-4">
+            {!globalSearchResults ? (
+              <div className="text-xs text-[#8492A6] text-center py-6">
+                Type any entity name, phone number, wallet, or SHA-256 prefix to search across the entire forensic repository.
+              </div>
+            ) : (
+              <>
+                {globalSearchResults.entities?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#8492A6]">
+                      Matching Entities ({globalSearchResults.entities.length})
                     </div>
-                  )}
-
-                  {globalSearchResults.evidence?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#8492A6]">
-                        Matching Evidence ({globalSearchResults.evidence.length})
-                      </div>
-                      {globalSearchResults.evidence.map((ev: EvidenceItem) => (
+                    {globalSearchResults.entities.map(
+                      (ent: ExtractedEntity) => (
                         <div
-                          key={ev.id}
+                          key={ent.id}
                           onClick={() => {
-                            setSelectedEvidenceId(ev.id);
-                            setActiveTab('EVIDENCE');
+                            setSelectedEntityId(ent.id);
+                            setActiveTab('GRAPH');
                             setShowSearchModal(false);
                           }}
-                          className="p-3 rounded-xl bg-white/70 hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
+                          className="p-3 rounded-xl bg-white hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
                         >
                           <div>
-                            <span className="font-mono font-bold text-[#2563EB] mr-2">
-                              {ev.evidenceCode}
-                            </span>
                             <span className="font-semibold text-[#202733]">
-                              {ev.originalFilename}
+                              {ent.displayLabel}
+                            </span>
+                            <span className="ml-2 font-mono text-[11px] text-[#8492A6]">
+                              ({ent.entityType})
                             </span>
                           </div>
                           <span className="text-[#2563EB] font-semibold">
-                            Open Vault →
+                            Inspect Graph →
                           </span>
                         </div>
-                      ))}
+                      )
+                    )}
+                  </div>
+                )}
+
+                {globalSearchResults.evidence?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#8492A6]">
+                      Matching Evidence ({globalSearchResults.evidence.length})
                     </div>
-                  )}
-                </>
-              )}
-            </div>
+                    {globalSearchResults.evidence.map((ev: EvidenceItem) => (
+                      <div
+                        key={ev.id}
+                        onClick={() => {
+                          setSelectedEvidenceId(ev.id);
+                          setActiveTab('EVIDENCE');
+                          setShowSearchModal(false);
+                        }}
+                        className="p-3 rounded-xl bg-white hover:bg-blue-50/70 border border-slate-200/80 cursor-pointer flex items-center justify-between text-xs transition shadow-2xs"
+                      >
+                        <div>
+                          <span className="font-mono font-bold text-[#2563EB] mr-2">
+                            {ev.evidenceCode}
+                          </span>
+                          <span className="font-semibold text-[#202733]">
+                            {ev.originalFilename}
+                          </span>
+                        </div>
+                        <span className="text-[#2563EB] font-semibold">
+                          Open Vault →
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
-      )}
+      </Modal>
 
-      {/* Create New Investigation Case Modal */}
-      {showNewCaseModal && (
-        <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-md flex items-center justify-center px-4">
-          <form
-            onSubmit={handleCreateNewCase}
-            className="cf-glass-panel border border-white/90 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 text-[#202733]"
-          >
-            <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#2563EB]" />
-                <h3 className="text-base font-bold text-[#202733]">
-                  Initialize New Forensic Investigation Case
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowNewCaseModal(false)}
-                className="text-[#8492A6] hover:text-[#202733] p-1 rounded-lg hover:bg-slate-100 transition"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block font-bold text-[#202733] mb-1">
-                  Investigation Title
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newCaseTitle}
-                  onChange={(e) => setNewCaseTitle(e.target.value)}
-                  placeholder="e.g., Operation MuleBridge — Multi-Hop UPI & Crypto Phishing"
-                  style={{ backgroundColor: '#FFFFFF', color: '#202733' }}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[#DCE2E8] text-[#202733] placeholder-[#8492A6] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[#202733] mb-1">
-                    Incident Typology
-                  </label>
-                  <select
-                    value={newCaseType}
-                    onChange={(e) => setNewCaseType(e.target.value)}
-                    style={{ backgroundColor: '#FFFFFF', color: '#202733' }}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[#DCE2E8] text-[#202733] focus:outline-none focus:border-[#2563EB] cursor-pointer"
-                  >
-                    <option value="UPI_WIRE_FRAUD" style={{ backgroundColor: '#FFFFFF', color: '#202733' }} className="bg-white text-[#202733]">
-                      UPI &amp; IMPS Mule Fraud
-                    </option>
-                    <option value="BEC_INVOICE_HIJACK" style={{ backgroundColor: '#FFFFFF', color: '#202733' }} className="bg-white text-[#202733]">
-                      BEC SWIFT Invoice Hijack
-                    </option>
-                    <option value="CRYPTO_DRAINER" style={{ backgroundColor: '#FFFFFF', color: '#202733' }} className="bg-white text-[#202733]">
-                      Crypto Wallet Phishing
-                    </option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-[#202733] mb-1">
-                    Estimated Loss (USD)
-                  </label>
-                  <input
-                    type="number"
-                    value={newCaseLoss}
-                    onChange={(e) => setNewCaseLoss(e.target.value)}
-                    style={{ backgroundColor: '#FFFFFF', color: '#202733' }}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-[#DCE2E8] text-[#202733] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-[#202733] mb-1">
-                  Victim Name / Organization
-                </label>
-                <input
-                  type="text"
-                  value={newCaseVictim}
-                  onChange={(e) => setNewCaseVictim(e.target.value)}
-                  placeholder="e.g., Horizon FinServe Pvt. Ltd."
-                  style={{ backgroundColor: '#FFFFFF', color: '#202733' }}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[#DCE2E8] text-[#202733] placeholder-[#8492A6] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-[#202733] mb-1">
-                  Initial Incident Summary
-                </label>
-                <textarea
-                  rows={3}
-                  value={newCaseSummary}
-                  onChange={(e) => setNewCaseSummary(e.target.value)}
-                  placeholder="Describe initial indicators of compromise..."
-                  style={{ backgroundColor: '#FFFFFF', color: '#202733' }}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-[#DCE2E8] text-[#202733] placeholder-[#8492A6] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB]"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowNewCaseModal(false)}
-                className="px-4 py-2 rounded-xl bg-[#F0F2F4] hover:bg-[#E9EDF2] border border-[#DCE2E8] text-[#566274] hover:text-[#202733] text-xs font-semibold transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition"
-              >
-                Create &amp; Open Case
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      {/* Multi-Step Case Creation & Editing Wizard Modal */}
+      <NewCaseWizardModal
+        isOpen={showNewCaseModal}
+        mode={caseModalMode}
+        onClose={() => setShowNewCaseModal(false)}
+        existingCases={cases}
+        defaultInvestigatorName={currentUser?.fullName}
+        initialCase={caseModalMode === 'EDIT' ? activeCase : null}
+        initialEntities={caseModalMode === 'EDIT' ? entities : undefined}
+        initialRelationships={caseModalMode === 'EDIT' ? relationships : undefined}
+        initialTimeline={caseModalMode === 'EDIT' ? timeline : undefined}
+        initialEvidence={caseModalMode === 'EDIT' ? evidenceList : undefined}
+        onSubmitCase={handleSubmitCaseWizard}
+        onDeleteCase={caseModalMode === 'EDIT' ? handleDeleteCase : undefined}
+      />
     </div>
   );
 }

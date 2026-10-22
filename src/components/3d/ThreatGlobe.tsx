@@ -4,11 +4,17 @@ import * as THREE from 'three';
 import { geoEquirectangular, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
 import land110 from 'world-atlas/land-110m.json';
-import { RotateCcw, ArrowRight, Globe, X } from 'lucide-react';
-import { ExtractedEntity } from '../../types';
+import { RotateCcw, ArrowRight, Globe, X, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  ExtractedEntity,
+  ForensicCaseSummary,
+  EntityRelationship,
+} from '../../types';
 
 export interface ThreatGlobeProps {
+  activeCase?: ForensicCaseSummary;
   entities?: ExtractedEntity[];
+  relationships?: EntityRelationship[];
   onInspectGraph: () => void;
   className?: string;
   style?: React.CSSProperties;
@@ -354,10 +360,11 @@ const DottedContinents: React.FC = () => {
  * 6 Country Markers + 2.5s Expanding Surface Rings
  */
 const CountryMarkers3D: React.FC<{
+  markers: GlobeMarker[];
   selectedId: string | null;
   onSelectMarker: (marker: GlobeMarker) => void;
   reducedMotion: boolean;
-}> = ({ selectedId, onSelectMarker, reducedMotion }) => {
+}> = ({ markers, selectedId, onSelectMarker, reducedMotion }) => {
   const ringRefs = useRef<Array<THREE.Mesh | null>>([]);
   const pinGeo = useMemo(() => new THREE.SphereGeometry(0.022, 16, 16), []);
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.03, 0.038, 32), []);
@@ -370,7 +377,7 @@ const CountryMarkers3D: React.FC<{
   }, [pinGeo, ringGeo]);
 
   const markerData = useMemo(() => {
-    return GLOBE_MARKERS.map((m) => {
+    return markers.map((m) => {
       const normal = latLonToVec3(m.lat, m.lon, 1.0).normalize();
       const pos = normal.clone().multiplyScalar(R * 1.008);
       const quat = new THREE.Quaternion().setFromUnitVectors(
@@ -379,7 +386,7 @@ const CountryMarkers3D: React.FC<{
       );
       return { ...m, pos, normal, quat };
     });
-  }, []);
+  }, [markers]);
 
   useFrame((state) => {
     if (reducedMotion) return;
@@ -441,9 +448,13 @@ const CountryMarkers3D: React.FC<{
 };
 
 /**
- * 4 Hub-and-Spoke Connection Arcs with Traveling Packet Dot + Short Fading Tail
+ * Hub-and-Spoke Connection Arcs with Traveling Packet Dot + Short Fading Tail
  */
-const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion }) => {
+const ConnectionArcs3D: React.FC<{
+  markers: GlobeMarker[];
+  arcPairs: Array<{ from: string; to: string; delay: number }>;
+  reducedMotion: boolean;
+}> = ({ markers, arcPairs, reducedMotion }) => {
   const packetRefs = useRef<Array<THREE.Mesh | null>>([]);
   const tail1Refs = useRef<Array<THREE.Mesh | null>>([]);
   const tail2Refs = useRef<Array<THREE.Mesh | null>>([]);
@@ -453,29 +464,32 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
   const tail2Geo = useMemo(() => new THREE.SphereGeometry(0.008, 8, 8), []);
 
   const arcs = useMemo(() => {
-    return GLOBE_ARCS.map((arc) => {
-      const mFrom = GLOBE_MARKERS.find((m) => m.id === arc.from)!;
-      const mTo = GLOBE_MARKERS.find((m) => m.id === arc.to)!;
-      const startVec = latLonToVec3(mFrom.lat, mFrom.lon, R * 1.008);
-      const endVec = latLonToVec3(mTo.lat, mTo.lon, R * 1.008);
-      const arcLength = startVec.distanceTo(endVec);
-      const midVec = startVec
-        .clone()
-        .add(endVec)
-        .multiplyScalar(0.5)
-        .normalize()
-        .multiplyScalar(R * (1 + 0.18 * arcLength));
+    return arcPairs
+      .map((arc) => {
+        const mFrom = markers.find((m) => m.id === arc.from);
+        const mTo = markers.find((m) => m.id === arc.to);
+        if (!mFrom || !mTo) return null;
+        const startVec = latLonToVec3(mFrom.lat, mFrom.lon, R * 1.008);
+        const endVec = latLonToVec3(mTo.lat, mTo.lon, R * 1.008);
+        const arcLength = startVec.distanceTo(endVec);
+        const midVec = startVec
+          .clone()
+          .add(endVec)
+          .multiplyScalar(0.5)
+          .normalize()
+          .multiplyScalar(R * (1 + 0.18 * arcLength));
 
-      const curve = new THREE.QuadraticBezierCurve3(startVec, midVec, endVec);
-      const lineGeo = new THREE.TubeGeometry(curve, 48, 0.0045, 6, false);
+        const curve = new THREE.QuadraticBezierCurve3(startVec, midVec, endVec);
+        const lineGeo = new THREE.TubeGeometry(curve, 48, 0.0045, 6, false);
 
-      return {
-        ...arc,
-        curve,
-        lineGeo,
-      };
-    });
-  }, []);
+        return {
+          ...arc,
+          curve,
+          lineGeo,
+        };
+      })
+      .filter((a): a is NonNullable<typeof a> => a !== null);
+  }, [markers, arcPairs]);
 
   useEffect(() => {
     return () => {
@@ -554,11 +568,82 @@ const ConnectionArcs3D: React.FC<{ reducedMotion: boolean }> = ({ reducedMotion 
   );
 };
 
-interface GlobeTextures {
+export interface GlobeTextures {
   day: THREE.Texture | null;
   bump: THREE.Texture | null;
   water: THREE.Texture | null;
   clouds: THREE.Texture | null;
+}
+
+function resolveEarthAssetUrl(filename: string): string {
+  const base = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || './';
+  const cleanBase = base.endsWith('/') ? base : `${base}/`;
+  return `${cleanBase}earth/${filename}`;
+}
+
+const textureCache = new Map<string, THREE.Texture>();
+let sharedGlobeTexturesPromise: Promise<GlobeTextures> | null = null;
+let sharedGlobeTextures: GlobeTextures = {
+  day: null,
+  bump: null,
+  water: null,
+  clouds: null,
+};
+
+function loadLocalEarthTexture(
+  filename: string,
+  isColor: boolean,
+  anisotropy: number = 8
+): Promise<THREE.Texture | null> {
+  const url = resolveEarthAssetUrl(filename);
+  if (textureCache.has(url)) {
+    return Promise.resolve(textureCache.get(url)!);
+  }
+
+  return new Promise((resolve) => {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      url,
+      (tex) => {
+        tex.generateMipmaps = true;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        if (isColor) {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = anisotropy;
+        }
+        tex.needsUpdate = true;
+        textureCache.set(url, tex);
+        resolve(tex);
+      },
+      undefined,
+      (err) => {
+        console.warn(`[ThreatGlobe] Failed loading local /earth/${filename}:`, err);
+        resolve(null);
+      }
+    );
+  });
+}
+
+export function getPreloadedGlobeTextures(maxAnisotropy: number = 8): Promise<GlobeTextures> {
+  if (sharedGlobeTexturesPromise) return sharedGlobeTexturesPromise;
+
+  sharedGlobeTexturesPromise = Promise.all([
+    loadLocalEarthTexture('earth-day.jpg', true, maxAnisotropy),
+    loadLocalEarthTexture('earth-bump.png', false, 1),
+    loadLocalEarthTexture('earth-water.png', false, 1),
+    loadLocalEarthTexture('earth-clouds.png', false, 1),
+  ]).then(([day, bump, water, clouds]) => {
+    sharedGlobeTextures = { day, bump, water, clouds };
+    return sharedGlobeTextures;
+  });
+
+  return sharedGlobeTexturesPromise;
+}
+
+// Preload immediately at startup so photo texture is in memory before Stage 1 mounts
+if (typeof window !== 'undefined') {
+  getPreloadedGlobeTextures();
 }
 
 /**
@@ -567,6 +652,8 @@ interface GlobeTextures {
  * and Damped Rotation & Label Projection.
  */
 interface GlobeSceneProps {
+  markers: GlobeMarker[];
+  arcPairs: Array<{ from: string; to: string; delay: number }>;
   selectedMarker: GlobeMarker | null;
   onSelectMarker: (m: GlobeMarker | null) => void;
   labelElsRef: React.MutableRefObject<Record<string, HTMLButtonElement | null>>;
@@ -587,6 +674,8 @@ const easeInOutCubic = (x: number): number =>
   x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 
 const GlobeScene: React.FC<GlobeSceneProps> = ({
+  markers,
+  arcPairs,
   selectedMarker,
   onSelectMarker,
   labelElsRef,
@@ -606,110 +695,25 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
   const introStartRef = useRef<number | null>(null);
   const firstFrameNotifiedRef = useRef<boolean>(false);
   const cloudMeshRef = useRef<THREE.Mesh>(null);
+  const keyLightRef = useRef<THREE.DirectionalLight>(null);
+  const fillLightRef = useRef<THREE.DirectionalLight>(null);
 
-  const [textures, setTextures] = useState<GlobeTextures>({
-    day: null,
-    bump: null,
-    water: null,
-    clouds: null,
-  });
+  const [textures, setTextures] = useState<GlobeTextures>(() => ({ ...sharedGlobeTextures }));
 
-  // Asynchronous texture loading with local -> remote -> procedural fallback
+  // Asynchronous texture loading from module-level cached singleton
   useEffect(() => {
     let active = true;
-    const loader = new THREE.TextureLoader();
+    const maxAniso = Math.min(8, gl.capabilities.getMaxAnisotropy());
 
-    const loadTexture = (
-      localUrl: string,
-      remoteUrl: string,
-      isColor: boolean
-    ): Promise<THREE.Texture | null> => {
-      return new Promise((resolve) => {
-        loader.load(
-          localUrl,
-          (tex) => {
-            if (!active) {
-              tex.dispose();
-              resolve(null);
-              return;
-            }
-            tex.generateMipmaps = true;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            tex.magFilter = THREE.LinearFilter;
-            if (isColor) {
-              tex.colorSpace = THREE.SRGBColorSpace;
-              tex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
-            }
-            resolve(tex);
-          },
-          undefined,
-          () => {
-            // Attempt remote fallback
-            loader.load(
-              remoteUrl,
-              (remTex) => {
-                if (!active) {
-                  remTex.dispose();
-                  resolve(null);
-                  return;
-                }
-                remTex.generateMipmaps = true;
-                remTex.minFilter = THREE.LinearMipmapLinearFilter;
-                remTex.magFilter = THREE.LinearFilter;
-                if (isColor) {
-                  remTex.colorSpace = THREE.SRGBColorSpace;
-                  remTex.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
-                }
-                resolve(remTex);
-              },
-              undefined,
-              () => {
-                resolve(null);
-              }
-            );
-          }
-        );
-      });
-    };
-
-    Promise.all([
-      loadTexture(
-        '/earth/earth-day.jpg',
-        'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
-        true
-      ),
-      loadTexture(
-        '/earth/earth-bump.png',
-        'https://unpkg.com/three-globe/example/img/earth-topology.png',
-        false
-      ),
-      loadTexture(
-        '/earth/earth-water.png',
-        'https://unpkg.com/three-globe/example/img/earth-water.png',
-        false
-      ),
-      loadTexture(
-        '/earth/earth-clouds.png',
-        'https://threejs.org/examples/textures/planets/earth_clouds_1024.png',
-        false
-      ),
-    ]).then(([day, bump, water, clouds]) => {
+    getPreloadedGlobeTextures(maxAniso).then((loaded) => {
       if (active) {
-        setTextures({ day, bump, water, clouds });
-      } else {
-        day?.dispose();
-        bump?.dispose();
-        water?.dispose();
-        clouds?.dispose();
+        setTextures({ ...loaded });
       }
     });
 
     return () => {
       active = false;
-      textures.day?.dispose();
-      textures.bump?.dispose();
-      textures.water?.dispose();
-      textures.clouds?.dispose();
+      // Do NOT dispose shared cached textures so remounts and stage revisits never lose textures
     };
   }, [gl]);
 
@@ -728,12 +732,12 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
   }, [earthGeo, cloudGeo, rimGeo, graticuleGeo]);
 
   const markerVecs = useMemo(() => {
-    return GLOBE_MARKERS.map((m) => ({
+    return markers.map((m) => ({
       id: m.id,
       pos: latLonToVec3(m.lat, m.lon, R * 1.02),
       normal: latLonToVec3(m.lat, m.lon, 1.0).normalize(),
     }));
-  }, []);
+  }, [markers]);
 
   const projVec = useMemo(() => new THREE.Vector3(), []);
   const camDir = useMemo(() => new THREE.Vector3(), []);
@@ -754,16 +758,16 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
       cloudMeshRef.current.rotation.y += delta * 0.008;
     }
 
-    // 1. Framing & Intro: Never start cropped. Intro starts at 1.08*fit and eases into fit over 2.0s
+    // 1. Framing & Intro: Never start cropped. Intro starts at 1.05*fit and eases promptly into fit over 0.4s
     const introElapsed = now - introStartRef.current;
     if (!introDoneRef.current) {
-      if (reducedMotion || introElapsed >= 2.0) {
+      if (reducedMotion || introElapsed >= 0.4) {
         introDoneRef.current = true;
         sphericalTargetRef.current.radius = fitDistance;
         sphericalCurrentRef.current.radius = fitDistance;
       } else {
-        const u = easeInOutCubic(Math.min(1, introElapsed / 2.0));
-        const r = THREE.MathUtils.lerp(fitDistance * 1.08, fitDistance, u);
+        const u = easeInOutCubic(Math.min(1, introElapsed / 0.4));
+        const r = THREE.MathUtils.lerp(fitDistance * 1.05, fitDistance, u);
         sphericalTargetRef.current.radius = r;
         sphericalCurrentRef.current.radius = r;
       }
@@ -829,6 +833,29 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
     camera.lookAt(0, 0, 0);
     camera.updateMatrixWorld();
 
+    // Anchor key and fill directional lights relative to active camera view direction
+    // so the visible hemisphere stays consistently bright and legible across all rotations.
+    if (keyLightRef.current) {
+      const keyPhi = Math.max(0.22, phi - 0.32);
+      const keyTheta = theta - 0.42;
+      const keyR = 6.5;
+      keyLightRef.current.position.set(
+        -keyR * Math.sin(keyPhi) * Math.cos(keyTheta),
+        keyR * Math.cos(keyPhi),
+        keyR * Math.sin(keyPhi) * Math.sin(keyTheta)
+      );
+    }
+    if (fillLightRef.current) {
+      const fillPhi = Math.min(Math.PI - 0.22, phi + 0.38);
+      const fillTheta = theta + 0.85;
+      const fillR = 5.5;
+      fillLightRef.current.position.set(
+        -fillR * Math.sin(fillPhi) * Math.cos(fillTheta),
+        fillR * Math.cos(fillPhi),
+        fillR * Math.sin(fillPhi) * Math.sin(fillTheta)
+      );
+    }
+
     // 3. Project 6 2D HTML pill labels and hide when on rear hemisphere (dot(normal, camDir) < 0.15)
     camDir.copy(camera.position).normalize();
     for (let i = 0; i < markerVecs.length; i++) {
@@ -854,10 +881,11 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
 
   return (
     <group>
-      {/* Daylight Illumination with realistic sun angle and subtle atmospheric blue */}
-      <ambientLight intensity={0.65} color="#FFFFFF" />
-      <directionalLight position={[5, 4, 3]} intensity={1.15} color="#FFFFFF" />
-      <directionalLight position={[-5, -2, -3]} intensity={0.25} color="#93C5FD" />
+      {/* Daylight Illumination (~25% brighter perceived surface detail, camera-anchored key & fill) */}
+      <ambientLight intensity={0.95} color="#FFFFFF" />
+      <hemisphereLight args={['#FFFFFF', '#DCE8F8', 0.45]} />
+      <directionalLight ref={keyLightRef} position={[5, 4, 3]} intensity={1.45} color="#FFFDF8" />
+      <directionalLight ref={fillLightRef} position={[-5, -2, -3]} intensity={0.45} color="#BFDBFE" />
 
       {/* Primary Earth Sphere with Day Map Texture */}
       <mesh
@@ -878,13 +906,17 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
         }}
       >
         <meshStandardMaterial
+          key={textures.day ? 'earth-day-ready' : 'earth-day-loading'}
           map={textures.day || undefined}
           bumpMap={textures.bump || undefined}
-          bumpScale={0.024}
+          bumpScale={0.022}
           roughnessMap={textures.water || undefined}
-          roughness={textures.day ? 0.42 : 0.85}
-          metalness={0.05}
+          roughness={textures.day ? 0.52 : 0.85}
+          metalness={0.02}
           color={textures.day ? '#FFFFFF' : '#DCE6F5'}
+          emissive={textures.day ? '#FFFFFF' : '#000000'}
+          emissiveMap={textures.day || undefined}
+          emissiveIntensity={textures.day ? 0.12 : 0}
         />
       </mesh>
 
@@ -894,7 +926,7 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
           <meshStandardMaterial
             map={textures.clouds}
             transparent
-            opacity={0.15}
+            opacity={0.14}
             depthWrite={false}
           />
         </mesh>
@@ -923,17 +955,45 @@ const GlobeScene: React.FC<GlobeSceneProps> = ({
       {/* Procedural Dotted Continents active as fallback if day texture fails to load */}
       {!textures.day && <DottedContinents />}
 
-      {/* 4 Hub-and-Spoke Connection Arcs with Traveling Packets */}
-      <ConnectionArcs3D reducedMotion={reducedMotion} />
+      {/* Hub-and-Spoke Connection Arcs with Traveling Packets */}
+      <ConnectionArcs3D
+        markers={markers}
+        arcPairs={arcPairs}
+        reducedMotion={reducedMotion}
+      />
 
-      {/* 6 Country Markers + Expanding Rings */}
+      {/* Country Markers + Expanding Rings */}
       <CountryMarkers3D
+        markers={markers}
         selectedId={selectedMarker?.id || null}
         onSelectMarker={(m) => onSelectMarker(m)}
         reducedMotion={reducedMotion}
       />
     </group>
   );
+};
+
+// Known country coordinate lookup (preserves exact coordinates from GLOBE_MARKERS + common forensic jurisdictions)
+const COUNTRY_COORDINATES: Record<string, { lat: number; lon: number; id: string }> = {
+  germany: { id: 'de', lat: 51.2, lon: 10.4 },
+  india: { id: 'in', lat: 20.6, lon: 78.9 },
+  russia: { id: 'ru', lat: 61.5, lon: 90.0 },
+  'united states': { id: 'us', lat: 38.0, lon: -97.0 },
+  usa: { id: 'us', lat: 38.0, lon: -97.0 },
+  us: { id: 'us', lat: 38.0, lon: -97.0 },
+  brazil: { id: 'br', lat: -14.2, lon: -51.9 },
+  china: { id: 'cn', lat: 35.9, lon: 104.2 },
+  'united kingdom': { id: 'uk', lat: 54.0, lon: -2.0 },
+  uk: { id: 'uk', lat: 54.0, lon: -2.0 },
+  singapore: { id: 'sg', lat: 1.35, lon: 103.8 },
+  uae: { id: 'ae', lat: 24.0, lon: 54.0 },
+  'united arab emirates': { id: 'ae', lat: 24.0, lon: 54.0 },
+  switzerland: { id: 'ch', lat: 46.8, lon: 8.2 },
+  netherlands: { id: 'nl', lat: 52.1, lon: 5.3 },
+  japan: { id: 'jp', lat: 36.2, lon: 138.2 },
+  australia: { id: 'au', lat: -25.3, lon: 133.8 },
+  canada: { id: 'ca', lat: 56.1, lon: -106.3 },
+  france: { id: 'fr', lat: 46.2, lon: 2.2 },
 };
 
 // Default camera orientation centered between Germany (51.2N, 10.4E) and India (20.6N, 78.9E)
@@ -943,6 +1003,9 @@ const DEFAULT_PHI = (90 - DEFAULT_LAT) * (Math.PI / 180);
 const DEFAULT_THETA = (DEFAULT_LON + 180) * (Math.PI / 180);
 
 export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
+  activeCase,
+  entities = [],
+  relationships = [],
   onInspectGraph,
   className = '',
   style,
@@ -951,12 +1014,108 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   const [webglSupported, setWebglSupported] = useState<boolean>(true);
   const [reducedMotion, setReducedMotion] = useState<boolean>(false);
   const [isVisible, setIsVisible] = useState<boolean>(true);
-  const [stageReady, setStageReady] = useState<boolean>(false);
+  const [stageReady] = useState<boolean>(true);
+  const [isEngaged, setIsEngaged] = useState<boolean>(false);
+  const isEngagedRef = useRef<boolean>(false);
+  const engageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({
     width: 0,
     height: 0,
   });
   const [canvasReady, setCanvasReady] = useState<boolean>(false);
+
+  const isUserCreated = Boolean(
+    activeCase &&
+      (activeCase.caseOrigin === 'USER_CREATED' ||
+        activeCase.id.startsWith('case-custom-'))
+  );
+
+  // Reset selectedMarker when switching cases
+  useEffect(() => {
+    setSelectedMarker(null);
+  }, [activeCase?.id]);
+
+  // Derive markers, arcs, and unplotted countries for user-created cases while preserving GLOBE_MARKERS for pre-loaded cases
+  const { activeMarkers, activeArcs, unplottedCountries } = useMemo(() => {
+    if (!isUserCreated) {
+      return {
+        activeMarkers: GLOBE_MARKERS,
+        activeArcs: GLOBE_ARCS,
+        unplottedCountries: [] as string[],
+      };
+    }
+
+    const markerMap = new Map<string, GlobeMarker>();
+    const entityCountryId = new Map<string, string>();
+    const unplottedSet = new Set<string>();
+
+    for (const ent of entities) {
+      const rawCountry = (ent.country || '').trim();
+      const hasCoords =
+        typeof ent.lat === 'number' &&
+        typeof ent.lon === 'number' &&
+        Number.isFinite(ent.lat) &&
+        Number.isFinite(ent.lon);
+      if (!rawCountry && !hasCoords) continue;
+
+      const lookup = rawCountry
+        ? COUNTRY_COORDINATES[rawCountry.toLowerCase()]
+        : undefined;
+      if (!lookup && !hasCoords) {
+        if (rawCountry) unplottedSet.add(rawCountry);
+        continue;
+      }
+
+      const lat = hasCoords ? ent.lat! : lookup!.lat;
+      const lon = hasCoords ? ent.lon! : lookup!.lon;
+      const id = lookup?.id || rawCountry.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const countryLabel = rawCountry || `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
+      entityCountryId.set(ent.id, id);
+
+      const existing = markerMap.get(id);
+      if (existing) {
+        const nextCount = parseInt(existing.count, 10) + 1;
+        existing.count = String(nextCount);
+      } else {
+        const isFirst = markerMap.size === 0;
+        markerMap.set(id, {
+          id,
+          country: countryLabel,
+          lat,
+          lon,
+          role: ent.category || ent.entityType || 'Recorded entity',
+          color: isFirst ? '#2563EB' : '#DC2626',
+          count: '1',
+          keyAddress: ent.normalizedValue || ent.displayLabel,
+          whatHappened: `Recorded entity "${ent.displayLabel}" (${ent.entityType}) associated with ${countryLabel}.`,
+        });
+      }
+    }
+
+    const derivedArcs: Array<{ from: string; to: string; delay: number }> = [];
+    const seenArcPairs = new Set<string>();
+    for (const rel of relationships) {
+      const cFrom = entityCountryId.get(rel.sourceEntityId);
+      const cTo = entityCountryId.get(rel.targetEntityId);
+      if (cFrom && cTo && cFrom !== cTo) {
+        const key = `${cFrom}->${cTo}`;
+        if (!seenArcPairs.has(key)) {
+          seenArcPairs.add(key);
+          derivedArcs.push({
+            from: cFrom,
+            to: cTo,
+            delay: derivedArcs.length * 0.6,
+          });
+        }
+      }
+    }
+
+    return {
+      activeMarkers: Array.from(markerMap.values()),
+      activeArcs: derivedArcs,
+      unplottedCountries: Array.from(unplottedSet),
+    };
+  }, [isUserCreated, entities, relationships]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -977,6 +1136,18 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   const [hoverReadout, setHoverReadout] = useState<GeoHoverInfo | null>(null);
   const lastHoverUpdateRef = useRef<number>(0);
 
+  // Release globe wheel engagement when clicking outside the globe
+  useEffect(() => {
+    const handleOutsidePointer = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        isEngagedRef.current = false;
+        setIsEngaged(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsidePointer);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointer);
+  }, []);
+
   const handleGlobeHover = useCallback((info: GeoHoverInfo | null) => {
     const now = performance.now();
     if (info === null) {
@@ -991,6 +1162,8 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   }, []);
 
   // Compute fit distance based on FOV=38 and current container aspect ratio
+  // R_FIT=1.08, MARGIN=1.04 yields ~10.5% larger default projected Earth diameter
+  // while keeping safe unclipped margins for markers (1.02R), rim (1.018R), and arcs.
   const fitDistance = useMemo(() => {
     const fov = 38;
     const vFovRad = (fov * Math.PI) / 360;
@@ -1000,7 +1173,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
         : 1.5;
     const hFovRad = Math.atan(Math.tan(vFovRad) * aspect);
     const R_FIT = 1.08;
-    const MARGIN = 1.14;
+    const MARGIN = 1.04;
     const distV = (R_FIT * MARGIN) / Math.sin(vFovRad);
     const distH = (R_FIT * MARGIN) / Math.sin(hFovRad);
     return Math.max(distV, distH);
@@ -1009,12 +1182,12 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   const sphericalTargetRef = useRef({
     theta: DEFAULT_THETA,
     phi: DEFAULT_PHI,
-    radius: 3.6,
+    radius: fitDistance,
   });
   const sphericalCurrentRef = useRef({
     theta: DEFAULT_THETA,
     phi: DEFAULT_PHI,
-    radius: 3.6,
+    radius: fitDistance,
   });
 
   // Keep camera distance proportional on container resize without restarting intro
@@ -1027,35 +1200,6 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
       prevFitRef.current = fitDistance;
     }
   }, [fitDistance]);
-
-  // Stage-readiness observer: wait for .stage-enter animationend (with 500ms fallback)
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) {
-      setStageReady(true);
-      return;
-    }
-
-    const stageEl = el.closest('.stage-enter') as HTMLElement | null;
-    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-
-    if (!stageEl) {
-      setStageReady(true);
-    } else {
-      const handleAnimEnd = () => {
-        setStageReady(true);
-      };
-      stageEl.addEventListener('animationend', handleAnimEnd, { once: true });
-      fallbackTimer = setTimeout(() => {
-        setStageReady(true);
-      }, 500);
-
-      return () => {
-        stageEl.removeEventListener('animationend', handleAnimEnd);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-      };
-    }
-  }, []);
 
   // WebGL support, reduced motion, viewport intersection, and ResizeObserver
   useEffect(() => {
@@ -1098,11 +1242,16 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
     };
   }, []);
 
-  // Proportional exponential wheel zoom with boundary escape (prevents trapping page scroll)
+  // Proportional exponential wheel zoom: ONLY active when deliberately engaged (focus/click)
+  // so normal document vertical scroll is NEVER swallowed.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (!isEngagedRef.current) {
+        return; // Allow page to scroll naturally!
+      }
+
       introDoneRef.current = true;
       lastInteractionTimeRef.current = performance.now();
 
@@ -1130,6 +1279,8 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
 
   const focusCountry = useCallback(
     (marker: GlobeMarker | null) => {
+      isEngagedRef.current = true;
+      setIsEngaged(true);
       // Ignore click if was a drag operation (> 5px)
       if (dragDistanceRef.current > 5) return;
       introDoneRef.current = true;
@@ -1148,6 +1299,8 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
   );
 
   const handleResetView = useCallback(() => {
+    isEngagedRef.current = true;
+    setIsEngaged(true);
     introDoneRef.current = true;
     lastInteractionTimeRef.current = performance.now();
     velocityRef.current = { theta: 0, phi: 0 };
@@ -1155,6 +1308,26 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
     sphericalTargetRef.current.theta = DEFAULT_THETA;
     sphericalTargetRef.current.phi = DEFAULT_PHI;
     sphericalTargetRef.current.radius = fitDistance;
+  }, [fitDistance]);
+
+  const handleZoomIn = useCallback(() => {
+    isEngagedRef.current = true;
+    setIsEngaged(true);
+    introDoneRef.current = true;
+    lastInteractionTimeRef.current = performance.now();
+    const minR = fitDistance * 0.55;
+    sphericalTargetRef.current.radius = Math.max(minR, sphericalTargetRef.current.radius * 0.82);
+    velocityRef.current = { theta: 0, phi: 0 };
+  }, [fitDistance]);
+
+  const handleZoomOut = useCallback(() => {
+    isEngagedRef.current = true;
+    setIsEngaged(true);
+    introDoneRef.current = true;
+    lastInteractionTimeRef.current = performance.now();
+    const maxR = fitDistance * 1.50;
+    sphericalTargetRef.current.radius = Math.min(maxR, sphericalTargetRef.current.radius * 1.18);
+    velocityRef.current = { theta: 0, phi: 0 };
   }, [fitDistance]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1276,7 +1449,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
             </h2>
           </div>
           <p className="text-[13px] text-[#5B6B85] mt-0.5">
-            Drag to rotate · Scroll to zoom · Click a marker for details
+            Drag to rotate · Click globe or +/- to zoom · Page scrolls naturally
           </p>
         </div>
 
@@ -1307,6 +1480,11 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
           isHoveringRef.current = false;
           isDraggingRef.current = false;
           lastInteractionTimeRef.current = performance.now();
+          if (engageTimeoutRef.current) clearTimeout(engageTimeoutRef.current);
+          engageTimeoutRef.current = setTimeout(() => {
+            isEngagedRef.current = false;
+            setIsEngaged(false);
+          }, 3500);
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -1316,7 +1494,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
           touchAction: 'pan-y',
           background: 'linear-gradient(180deg, #F8FAFD 0%, #EBF1FA 100%)',
         }}
-        className="relative w-full flex-1 min-h-[380px] rounded-[20px] overflow-hidden border border-[#E2E8F1] select-none cursor-grab active:cursor-grabbing"
+        className="relative w-full flex-1 min-h-[360px] sm:min-h-[440px] rounded-[20px] overflow-hidden border border-[#E2E8F1] select-none cursor-grab active:cursor-grabbing"
       >
         {/* Porcelain skeleton shown while mounting and sizing */}
         {(!isReady || !canvasReady) && (
@@ -1333,18 +1511,25 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
 
         {isReady && webglSupported && (
           <div
-            className="w-full h-full transition-opacity duration-350"
+            className="w-full h-full transition-opacity duration-150"
             style={{ opacity: canvasReady ? 1 : 0 }}
           >
             <Canvas
               camera={{ position: [0, 0, fitDistance * 1.08], fov: 38 }}
               dpr={[1, 1.75]}
               frameloop={isVisible ? 'always' : 'never'}
-              gl={{ antialias: true, alpha: true }}
+              gl={{
+                antialias: true,
+                alpha: true,
+                toneMapping: THREE.ACESFilmicToneMapping,
+                toneMappingExposure: 1.12,
+              }}
               onPointerMissed={() => handleResetView()}
               className="w-full h-full"
             >
               <GlobeScene
+                markers={activeMarkers}
+                arcPairs={activeArcs}
                 selectedMarker={selectedMarker}
                 onSelectMarker={focusCountry}
                 labelElsRef={labelElsRef}
@@ -1367,28 +1552,36 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
         {!webglSupported && (
           /* Fallback if WebGL is unavailable */
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center">
-            <p className="text-sm font-semibold text-[#0F1B33] mb-3">
-              Select a country below to inspect its role in the case:
-            </p>
-            <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-              {GLOBE_MARKERS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setSelectedMarker(m)}
-                  className="px-3 py-1.5 rounded-full bg-white border border-[#E2E8F1] text-xs font-medium text-[#0F1B33] hover:border-[#2563EB] cursor-pointer"
-                >
-                  {m.country} · {m.count}
-                </button>
-              ))}
-            </div>
+            {activeMarkers.length === 0 ? (
+              <p className="text-xs font-medium text-[#5B6B85]">
+                No locations recorded for this case
+              </p>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-[#0F1B33] mb-3">
+                  Select a country below to inspect its role in the case:
+                </p>
+                <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+                  {activeMarkers.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setSelectedMarker(m)}
+                      className="px-3 py-1.5 rounded-full bg-white border border-[#E2E8F1] text-xs font-medium text-[#0F1B33] hover:border-[#2563EB] cursor-pointer"
+                    >
+                      {m.country} · {m.count}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* 6 Projected 2D HTML Pill Labels (auto-hidden when behind globe) */}
+        {/* Projected 2D HTML Pill Labels (auto-hidden when behind globe) */}
         {webglSupported && (
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            {GLOBE_MARKERS.map((m) => {
+            {activeMarkers.map((m) => {
               const isSelected = selectedMarker?.id === m.id;
               return (
                 <button
@@ -1434,6 +1627,20 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
           </div>
         )}
 
+        {/* Neutral empty state when a user-created case has no plottable country locations */}
+        {isUserCreated && activeMarkers.length === 0 && (
+          <div className="absolute bottom-3.5 left-3.5 z-10 pointer-events-none">
+            <div className="inline-flex flex-col gap-0.5 px-3.5 py-2 rounded-2xl bg-white/92 backdrop-blur-md border border-[#E2E8F1] shadow-sm text-xs text-[#0F1B33]">
+              <span className="font-semibold">No locations recorded for this case</span>
+              {unplottedCountries.length > 0 && (
+                <span className="text-[11px] text-[#5B6B85]">
+                  Unplotted country notes: {unplottedCountries.join(', ')}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Live Geographic Hover Readout Pill */}
         <div className="absolute top-3.5 left-3.5 z-10 pointer-events-none transition-all duration-150">
           {hoverReadout ? (
@@ -1461,16 +1668,37 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
           )}
         </div>
 
-        {/* Single "Reset view" button in the top-right of the globe */}
-        <button
-          type="button"
-          onClick={handleResetView}
-          className="absolute top-3.5 right-3.5 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-white border border-[#E2E8F1] text-xs font-medium text-[#0F1B33] shadow-sm transition cursor-pointer"
-          title="Reset globe view"
-        >
-          <RotateCcw className="w-3.5 h-3.5 text-[#5B6B85]" />
-          <span>Reset view</span>
-        </button>
+        {/* Controls: Zoom In, Zoom Out, Reset view */}
+        <div className="absolute top-3.5 right-3.5 z-10 inline-flex items-center gap-1 p-1 rounded-full bg-white/92 backdrop-blur-md border border-[#E2E8F1] shadow-sm">
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[#5B6B85] hover:text-[#0F1B33] hover:bg-slate-100 transition cursor-pointer"
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[#5B6B85] hover:text-[#0F1B33] hover:bg-slate-100 transition cursor-pointer"
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-4 bg-slate-200" />
+          <button
+            type="button"
+            onClick={handleResetView}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full hover:bg-slate-100 text-xs font-medium text-[#0F1B33] transition cursor-pointer"
+            title="Reset globe view"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-[#5B6B85]" />
+            <span className="hidden sm:inline">Reset</span>
+          </button>
+        </div>
 
         {/* Clean White Side Card inside the Globe Card when a Country Marker is Clicked */}
         {selectedMarker && (

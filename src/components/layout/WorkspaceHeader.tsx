@@ -22,6 +22,7 @@ import {
 } from '../../types';
 import { InvestigationStageId } from './InvestigationStepper';
 import { Popover } from './Popover';
+import { BrandLogo } from '../ui/BrandLogo';
 
 export interface WorkspaceHeaderProps {
   onNavigateHome: () => void;
@@ -487,65 +488,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           type="button"
           onClick={onNavigateHome}
           title="Return to Public Overview"
-          aria-label="Return to Public Overview"
-          className={`flex items-center gap-2.5 text-left min-w-0 shrink-0 cursor-pointer group rounded-2xl px-1 py-0.5 transition-transform duration-150 active:scale-[0.985] ${focusRingClass}`}
+          aria-label="CyberFusion X — Return to Public Overview"
+          className={`flex items-center gap-2 text-left min-w-0 shrink-0 cursor-pointer group rounded-2xl px-1 py-0.5 transition-transform duration-150 active:scale-[0.985] ${focusRingClass}`}
         >
-          <div className="relative w-11 h-11 flex items-center justify-center shrink-0">
-            <svg
-              viewBox="0 0 48 48"
-              className="w-11 h-11 drop-shadow-[0_4px_10px_rgba(37,99,235,0.28)]"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="cfxCubeTop" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#E0F2FE" />
-                  <stop offset="55%" stopColor="#7DD3FC" />
-                  <stop offset="100%" stopColor="#38BDF8" />
-                </linearGradient>
-                <linearGradient id="cfxCubeLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#60A5FA" />
-                  <stop offset="100%" stopColor="#2563EB" />
-                </linearGradient>
-                <linearGradient id="cfxCubeRight" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#818CF8" />
-                  <stop offset="50%" stopColor="#3B82F6" />
-                  <stop offset="100%" stopColor="#1D4ED8" />
-                </linearGradient>
-              </defs>
-              <polygon
-                points="24,4 42,14.5 24,25 6,14.5"
-                fill="url(#cfxCubeTop)"
-                stroke="rgba(255,255,255,0.85)"
-                strokeWidth="0.8"
-              />
-              <polygon
-                points="6,14.5 24,25 24,44 6,33.5"
-                fill="url(#cfxCubeLeft)"
-                stroke="rgba(255,255,255,0.65)"
-                strokeWidth="0.8"
-              />
-              <polygon
-                points="24,25 42,14.5 42,33.5 24,44"
-                fill="url(#cfxCubeRight)"
-                stroke="rgba(255,255,255,0.65)"
-                strokeWidth="0.8"
-              />
-              <polygon
-                points="24,11 35,17.5 24,24 13,17.5"
-                fill="rgba(255,255,255,0.38)"
-              />
-              <circle cx="24" cy="25" r="3.2" fill="#FFFFFF" opacity="0.92" />
-            </svg>
-          </div>
-
-          <div className="flex flex-col leading-none min-w-0">
-            <span className="text-[22px] font-semibold tracking-tight text-slate-900 group-hover:text-[#1D4ED8] transition-colors whitespace-nowrap leading-none">
-              CyberFusion <span className="text-[#2563EB]">X</span>
-            </span>
-            <span className="cf-hide-md text-[12px] font-medium text-slate-500 mt-1 whitespace-nowrap">
-              Digital Forensics Lab
-            </span>
-          </div>
+          <BrandLogo variant="workspace" />
         </button>
 
         {/* 2. Divider */}
@@ -1048,7 +994,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             </div>
             <div className="min-w-0">
               <div className="text-[14px] font-semibold text-slate-900 truncate">
-                Reset sample data
+                Reset pre-loaded cases
               </div>
               <div className="text-[13px] text-slate-600 truncate">
                 Restore original cases and locked records

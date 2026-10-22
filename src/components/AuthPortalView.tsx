@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { DropletTabs, DropletTabItem } from './ui/DropletTabs';
+import { BrandLogo } from './ui/BrandLogo';
 
 export interface DemoUserEntry extends UserProfile {
   demoPassword?: string;
@@ -284,19 +285,7 @@ export const AuthPortalView: React.FC<AuthPortalViewProps> = ({
             className="h-7 w-px bg-slate-300/60 border-r border-white/90 shrink-0 hidden xs:block"
           />
 
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] text-white flex items-center justify-center shadow-xs shrink-0 border border-white/40">
-              <Shield className="w-4 h-4 text-white" />
-            </div>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 truncate">
-                CyberFusion <span className="text-[#2563EB]">X</span>
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-700 border border-blue-500/20 hidden md:inline shrink-0">
-                AUTH GATEWAY
-              </span>
-            </div>
-          </div>
+          <BrandLogo variant="auth" badgeText="AUTH GATEWAY" />
         </div>
 
         <div className="cf-glass-pill px-3 py-1.5 flex items-center gap-2 text-xs font-mono text-slate-700 shrink-0">
@@ -578,7 +567,7 @@ export const AuthPortalView: React.FC<AuthPortalViewProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                  Demo Investigator Profiles
+                  Investigator Profiles
                 </h2>
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[#1D4ED8] text-[10px] font-mono font-bold uppercase tracking-wider">
                   <Sparkles className="w-3 h-3" />

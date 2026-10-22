@@ -1,20 +1,47 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileDown,
   FileCode2,
   FileText,
+  FileSpreadsheet,
   ShieldCheck,
   CheckCircle2,
+  AlertTriangle,
   Check,
   Copy,
   FileSignature,
 } from 'lucide-react';
-import { ForensicCaseSummary } from '../types';
+import {
+  ForensicCaseSummary,
+  EvidenceItem,
+  ExtractedEntity,
+  EntityRelationship,
+  TimelineEvent,
+  IntegrityVerification,
+  ChainOfCustodyEntry,
+  UserProfile,
+} from '../types';
 import { copyToClipboardSafe } from '../lib/clipboard';
 import { DropletTabs, DropletTabItem } from './ui/DropletTabs';
+import {
+  buildReportModel,
+  generateReportPdfBytes,
+  generateReportMarkdown,
+  generateReportCsv,
+  buildSanitizedReportFilename,
+  triggerSafeBlobDownload,
+} from '../lib/reportBuilder';
 
 interface ForensicReportViewProps {
   activeCase: ForensicCaseSummary;
+  evidenceList?: EvidenceItem[];
+  entities?: ExtractedEntity[];
+  relationships?: EntityRelationship[];
+  timeline?: TimelineEvent[];
+  verifications?: IntegrityVerification[];
+  ledger?: ChainOfCustodyEntry[];
+  chainVerification?: any | null;
+  currentUser?: UserProfile | null;
 }
 
 const PREVIEW_TABS: DropletTabItem[] = [
@@ -24,30 +51,56 @@ const PREVIEW_TABS: DropletTabItem[] = [
 
 export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
   activeCase,
+  evidenceList = [],
+  entities = [],
+  relationships = [],
+  timeline = [],
+  verifications = [],
+  ledger = [],
+  chainVerification = null,
+  currentUser = null,
 }) => {
-  const [reportData, setReportData] = useState<any | null>(null);
-  const [loading, setLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [codePreviewMode, setCodePreviewMode] = useState<'JSON' | 'TEXT'>('JSON');
+  const [exportingFormat, setExportingFormat] = useState<
+    'PDF' | 'JSON' | 'MD' | 'CSV' | null
+  >(null);
 
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    fetch(`/api/v1/reports?caseId=${encodeURIComponent(activeCase.id)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (mounted) setReportData(data);
-      })
-      .catch(() => {
-        // Handled gracefully offline
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [activeCase.id]);
+  const reportModel = useMemo(
+    () =>
+      buildReportModel({
+        activeCase,
+        evidenceList,
+        entities,
+        relationships,
+        timeline,
+        verifications,
+        ledger,
+        chainVerification,
+        currentUser,
+      }),
+    [
+      activeCase,
+      evidenceList,
+      entities,
+      relationships,
+      timeline,
+      verifications,
+      ledger,
+      chainVerification,
+      currentUser,
+    ]
+  );
+
+  const jsonBundlePreview = useMemo(
+    () => JSON.stringify(reportModel, null, 2),
+    [reportModel]
+  );
+
+  const plainTextPreview = useMemo(
+    () => generateReportMarkdown(reportModel),
+    [reportModel]
+  );
 
   const handleCopy = async (text: string, key: string) => {
     if (await copyToClipboardSafe(text)) {
@@ -56,59 +109,193 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
     }
   };
 
-  const jsonBundlePreview = JSON.stringify(
-    {
-      type: 'bundle',
-      id: `bundle--${activeCase.id}`,
-      spec_version: '2.1',
-      objects: [
-        {
-          type: 'report',
-          id: `report--${activeCase.caseNumber}`,
-          name: activeCase.title,
-          description: activeCase.summary,
-          published: reportData?.generatedAt || '2026-10-01T12:00:00Z',
-          confidence: 98,
-          labels: ['threat-report', 'judicial-evidence', 'financial-fraud'],
-          object_refs: [
-            'indicator--phishing-sms',
-            'identity--victim-mehta',
-            'malware--fake-hdfc-apk',
-            'observed-data--tron-usdt',
-          ],
-        },
-      ],
-    },
-    null,
-    2
+  const yieldFrame = () =>
+    new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+
+  const handleDownloadPdf = async () => {
+    if (exportingFormat) return;
+    setExportingFormat('PDF');
+    try {
+      await yieldFrame();
+      const freshModel = buildReportModel({
+        activeCase,
+        evidenceList,
+        entities,
+        relationships,
+        timeline,
+        verifications,
+        ledger,
+        chainVerification,
+        currentUser,
+      });
+      const pdfResult = await generateReportPdfBytes(freshModel);
+      const blob = new Blob([pdfResult.bytes as unknown as BlobPart], {
+        type: 'application/pdf',
+      });
+      const filename = buildSanitizedReportFilename(
+        freshModel.metadata.caseNumber,
+        freshModel.metadata.generatedAtUtc,
+        'pdf'
+      );
+      triggerSafeBlobDownload(blob, filename);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleDownloadJson = async () => {
+    if (exportingFormat) return;
+    setExportingFormat('JSON');
+    try {
+      await yieldFrame();
+      const freshModel = buildReportModel({
+        activeCase,
+        evidenceList,
+        entities,
+        relationships,
+        timeline,
+        verifications,
+        ledger,
+        chainVerification,
+        currentUser,
+      });
+      const jsonText = JSON.stringify(freshModel, null, 2);
+      const blob = new Blob([jsonText], {
+        type: 'application/json;charset=utf-8',
+      });
+      const filename = buildSanitizedReportFilename(
+        freshModel.metadata.caseNumber,
+        freshModel.metadata.generatedAtUtc,
+        'json'
+      );
+      triggerSafeBlobDownload(blob, filename);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleDownloadMarkdown = async () => {
+    if (exportingFormat) return;
+    setExportingFormat('MD');
+    try {
+      await yieldFrame();
+      const freshModel = buildReportModel({
+        activeCase,
+        evidenceList,
+        entities,
+        relationships,
+        timeline,
+        verifications,
+        ledger,
+        chainVerification,
+        currentUser,
+      });
+      const mdText = generateReportMarkdown(freshModel);
+      const blob = new Blob([mdText], {
+        type: 'text/markdown;charset=utf-8',
+      });
+      const filename = buildSanitizedReportFilename(
+        freshModel.metadata.caseNumber,
+        freshModel.metadata.generatedAtUtc,
+        'md'
+      );
+      triggerSafeBlobDownload(blob, filename);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const handleDownloadCsv = async () => {
+    if (exportingFormat) return;
+    setExportingFormat('CSV');
+    try {
+      await yieldFrame();
+      const freshModel = buildReportModel({
+        activeCase,
+        evidenceList,
+        entities,
+        relationships,
+        timeline,
+        verifications,
+        ledger,
+        chainVerification,
+        currentUser,
+      });
+      const csvText = generateReportCsv(freshModel);
+      const blob = new Blob([csvText], {
+        type: 'text/csv;charset=utf-8',
+      });
+      const filename = buildSanitizedReportFilename(
+        freshModel.metadata.caseNumber,
+        freshModel.metadata.generatedAtUtc,
+        'csv'
+      );
+      triggerSafeBlobDownload(blob, filename);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const checklistItems = useMemo(
+    () => [
+      {
+        title: 'Original files locked on upload',
+        detail:
+          reportModel.evidence.length > 0
+            ? `${reportModel.integrity.verifiedIntactCount} of ${reportModel.evidence.length} evidence files verified intact since upload.`
+            : 'No evidence files uploaded yet for this case.',
+        ready:
+          reportModel.evidence.length > 0 &&
+          reportModel.integrity.tamperedCount === 0,
+      },
+      {
+        title: 'Digital fingerprints match (SHA-256)',
+        detail:
+          reportModel.integrity.tamperedCount === 0 &&
+          reportModel.evidence.length > 0
+            ? 'Every ingested file matches its recorded 64-character SHA-256 fingerprint.'
+            : reportModel.integrity.tamperedCount > 0
+            ? `${reportModel.integrity.tamperedCount} file(s) flagged with fingerprint mismatch.`
+            : 'Awaiting evidence fingerprint verification.',
+        ready:
+          reportModel.evidence.length > 0 &&
+          reportModel.integrity.tamperedCount === 0,
+      },
+      {
+        title: 'Metadata & timestamp anomalies disclosed',
+        detail:
+          reportModel.warnings.length > 0
+            ? `${reportModel.warnings.length} metadata/timestamp finding(s) documented in Section 7.`
+            : 'Zero undisclosed metadata or timestamp discrepancies detected.',
+        ready: true,
+      },
+      {
+        title: 'Money trail and accounts mapped',
+        detail:
+          reportModel.entities.length > 0
+            ? `${reportModel.entities.length} entities and ${reportModel.relationships.length} relationship links correlated.`
+            : 'No entities or account links correlated yet.',
+        ready: reportModel.entities.length > 0,
+      },
+      {
+        title: 'Complete activity log attached',
+        detail:
+          reportModel.integrity.custodyEntries.length > 0
+            ? `${reportModel.integrity.custodyEntries.length} chain-of-custody entries recorded in order.`
+            : 'Chain-of-custody log initialized.',
+        ready: reportModel.integrity.custodyEntries.length > 0,
+      },
+    ],
+    [reportModel]
   );
 
-  const plainTextPreview =
-    reportData?.markdownPreview ||
-    `# Case Report: ${activeCase.title}\nCase ID: ${activeCase.caseNumber}\nVictim: ${activeCase.victimName}\nLead Investigator: ${activeCase.leadInvestigatorName || 'Cmdr. Arjun Verma'}\n\n## Summary\n${activeCase.summary}\n\n## Steps\n1. EVD-001 — Fake text message sent to victim\n2. EVD-002 — Login details stolen\n3. EVD-003 — Money transferred out ($4,850.00)\n4. EVD-004 — Money passed through accounts and cashed out`;
-
-  const checklistItems = [
-    {
-      title: 'Original files locked on upload',
-      detail: 'All 4 evidence files are locked and unchanged since upload.',
-    },
-    {
-      title: 'Digital fingerprints match (SHA-256)',
-      detail: 'Every file matches its recorded digital fingerprint.',
-    },
-    {
-      title: 'Edited photo timestamp noted',
-      detail: 'The 14-minute clock difference on EVD-003 is clearly disclosed.',
-    },
-    {
-      title: 'Money trail and accounts mapped',
-      detail: 'All connected phones, bank accounts, and wallets are linked.',
-    },
-    {
-      title: 'Complete activity log attached',
-      detail: 'Every investigator action is recorded in order from start to finish.',
-    },
-  ];
+  const readyChecklistCount = checklistItems.filter((c) => c.ready).length;
 
   return (
     <div className="mx-auto w-full max-w-[1680px] px-4 lg:px-8 pb-12 space-y-6 min-w-0">
@@ -132,7 +319,7 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
               </span>
               <span className="text-slate-300">•</span>
               <span className="font-mono text-xs text-slate-500">
-                {activeCase.caseNumber}
+                {reportModel.metadata.caseNumber}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">
@@ -144,37 +331,55 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
           </div>
         </div>
 
-        {/* Export Actions: Primary Download PDF; Secondary Download JSON, Download Markdown, Copy */}
+        {/* Export Actions: Primary Download PDF; Secondary Download JSON, Download Markdown, Download CSV, Copy */}
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <a
-            href={`/api/v1/reports/pdf?caseId=${encodeURIComponent(activeCase.id)}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            disabled={exportingFormat !== null}
+            onClick={handleDownloadPdf}
             className="cf-btn-blue h-10 px-4 text-xs sm:text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
           >
             <FileDown className="w-4 h-4" />
-            <span>Download PDF</span>
-          </a>
+            <span>
+              {exportingFormat === 'PDF' ? 'Generating PDF…' : 'Download PDF'}
+            </span>
+          </button>
 
-          <a
-            href={`/api/v1/reports/stix?caseId=${encodeURIComponent(activeCase.id)}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            disabled={exportingFormat !== null}
+            onClick={handleDownloadJson}
             className="h-10 px-3.5 rounded-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
           >
             <FileCode2 className="w-4 h-4 text-blue-600" />
-            <span>Download JSON</span>
-          </a>
+            <span>
+              {exportingFormat === 'JSON' ? 'Exporting…' : 'Download JSON'}
+            </span>
+          </button>
 
-          <a
-            href={`/api/v1/reports/markdown?caseId=${encodeURIComponent(activeCase.id)}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            disabled={exportingFormat !== null}
+            onClick={handleDownloadMarkdown}
             className="h-10 px-3.5 rounded-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
           >
             <FileText className="w-4 h-4 text-emerald-600" />
-            <span>Download Markdown</span>
-          </a>
+            <span>
+              {exportingFormat === 'MD' ? 'Exporting…' : 'Download Markdown'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            disabled={exportingFormat !== null}
+            onClick={handleDownloadCsv}
+            className="h-10 px-3.5 rounded-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+            <span>
+              {exportingFormat === 'CSV' ? 'Exporting…' : 'Download CSV'}
+            </span>
+          </button>
 
           <button
             type="button"
@@ -196,12 +401,6 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
         </div>
       </div>
 
-      {loading && (
-        <div className="cf-card p-5 text-center text-xs text-slate-500">
-          Preparing case report details…
-        </div>
-      )}
-
       {/* =========================================================================
           2. TWO-COLUMN REPORT LAYOUT
           Left 8 Cols: Clean Case Report Document
@@ -215,233 +414,285 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
           {/* Case Overview Grid */}
           <div className="border-b border-slate-100 pb-6 space-y-4 min-w-0">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Official Case Summary
+                  Official Case Summary • {reportModel.metadata.dataSourceClassification}
                 </div>
-                <h2 className="text-lg sm:text-xl font-bold text-slate-900 mt-0.5">
-                  {activeCase.title}
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 mt-0.5 break-words">
+                  {reportModel.metadata.caseName}
                 </h2>
               </div>
-              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#E7F6EF] text-[#0E6B45]">
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#E7F6EF] text-[#0E6B45] shrink-0">
                 Ready for review
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80">
+              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80 min-w-0">
                 <span className="text-slate-400 text-[11px] block">
                   Lead investigator
                 </span>
                 <span className="text-slate-900 font-bold truncate block mt-0.5">
-                  {activeCase.leadInvestigatorName || 'Cmdr. Arjun Verma'}
+                  {reportModel.metrics.leadInvestigator}
                 </span>
               </div>
-              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80">
+              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80 min-w-0">
                 <span className="text-slate-400 text-[11px] block">Victim</span>
                 <span className="text-slate-900 font-bold truncate block mt-0.5">
-                  {activeCase.victimName}
+                  {reportModel.metrics.victimName}
                 </span>
               </div>
-              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80">
+              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80 min-w-0">
                 <span className="text-slate-400 text-[11px] block">
                   Amount involved
                 </span>
                 <span className="text-slate-900 font-bold block mt-0.5 tabular-nums">
-                  ${activeCase.estimatedLossUsd?.toLocaleString() || '12,500'} USD
+                  {reportModel.metrics.recordedCaseLossUsd}
                 </span>
               </div>
-              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80">
+              <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80 min-w-0">
                 <span className="text-slate-400 text-[11px] block">
                   Report date
                 </span>
                 <span className="text-slate-900 font-bold block mt-0.5 font-mono tabular-nums">
-                  {new Date().toISOString().slice(0, 10)}
+                  {reportModel.metadata.generatedAtUtc.slice(0, 10)}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Section 1: What Happened */}
+          {/* Section 1: What Happened (Executive Summary) */}
           <div className="space-y-3 min-w-0">
             <h3 className="text-sm font-bold text-slate-900">
               1. What Happened
             </h3>
             <p className="text-xs sm:text-sm text-slate-700 leading-relaxed bg-[#F6F8FC] p-4 rounded-xl border border-slate-200/80">
-              {activeCase.summary}
+              {reportModel.summary.whatHappened}
             </p>
-            <div className="flex flex-wrap gap-2 pt-1 font-mono text-xs">
-              <span className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all">
-                Server IP: <strong>185.220.101.44</strong>
-              </span>
-              <span className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all">
-                Payment ID: <strong>apex.verify.settlement@okaxis</strong>
-              </span>
-              <span className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all">
-                Destination wallet: <strong>TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE</strong>
-              </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Risk Score</span>
+                <span className="font-mono font-bold text-slate-900 tabular-nums">
+                  {reportModel.metrics.riskScore} ({reportModel.metrics.severity})
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Timeline Steps</span>
+                <span className="font-mono font-bold text-slate-900 tabular-nums">
+                  {reportModel.metrics.timelineStepCount} events
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Mapped Entities</span>
+                <span className="font-mono font-bold text-slate-900 tabular-nums">
+                  {reportModel.entities.length} nodes / {reportModel.relationships.length} links
+                </span>
+              </div>
+              <div className="bg-[#F6F8FC] px-3 py-2 rounded-lg border border-slate-200/80">
+                <span className="text-slate-400 text-[11px] block">Integrity Verdict</span>
+                <span className="font-mono font-bold text-emerald-700">
+                  {reportModel.integrity.verifiedIntactCount}/{reportModel.integrity.totalEvidenceCount} Intact
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Section 2: Key Steps in Order */}
+          {/* Section 2: Key Steps in Order (Chronological Timeline) */}
           <div className="space-y-3 min-w-0">
-            <h3 className="text-sm font-bold text-slate-900">
-              2. Key Steps in Order
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-blue-700">Step 1</span>
-                  <span className="font-mono text-[11px] text-slate-500">EVD-001</span>
-                </div>
-                <div className="font-bold text-slate-900">
-                  Fake text message sent to victim
-                </div>
-                <p className="text-slate-600 leading-snug">
-                  Text message with a fake bank link sent to the victim&apos;s phone.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-blue-700">Step 2</span>
-                  <span className="font-mono text-[11px] text-slate-500">EVD-002</span>
-                </div>
-                <div className="font-bold text-slate-900">
-                  Login details stolen
-                </div>
-                <p className="text-slate-600 leading-snug">
-                  Fake login page captured the victim&apos;s password and one-time code.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-[#9A5B13]">Step 3</span>
-                  <span className="font-mono text-[11px] text-slate-500">EVD-003</span>
-                </div>
-                <div className="font-bold text-slate-900">
-                  Money transferred out ($4,850.00)
-                </div>
-                <p className="text-slate-600 leading-snug">
-                  Unauthorized transfer sent to an intermediary account (receipt photo shows a 14m timestamp edit).
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-blue-700">Step 4</span>
-                  <span className="font-mono text-[11px] text-slate-500">EVD-004</span>
-                </div>
-                <div className="font-bold text-slate-900">
-                  Money passed through accounts and cashed out
-                </div>
-                <p className="text-slate-600 leading-snug">
-                  Funds moved across accounts and converted into USDT cryptocurrency.
-                </p>
-              </div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">
+                2. Key Steps in Order ({reportModel.timeline.length})
+              </h3>
+              <span className="text-xs font-mono text-slate-500 tabular-nums">
+                {reportModel.financialSummary.currencySubtotals
+                  .map((s) => `${s.currency}: ${s.formattedSubtotal}`)
+                  .join(' • ') || reportModel.metrics.recordedCaseLossUsd}
+              </span>
             </div>
+
+            {reportModel.timeline.length === 0 ? (
+              <div className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 text-xs text-slate-500">
+                No timeline events recorded for this case yet.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {reportModel.timeline.map((step) => (
+                  <div
+                    key={step.id}
+                    className="p-3.5 rounded-xl bg-[#F6F8FC] border border-slate-200/80 space-y-1 min-w-0"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`font-bold ${
+                          step.hasWarning ? 'text-[#9A5B13]' : 'text-blue-700'
+                        }`}
+                      >
+                        Step {step.stepNumber} • {step.recordedTimestamp.slice(11, 19) || step.recordedTimestamp}
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-500">
+                        {step.linkedEvidenceCode}
+                      </span>
+                    </div>
+                    <div className="font-bold text-slate-900 break-words">
+                      {step.eventTitle}
+                    </div>
+                    <p className="text-slate-600 leading-snug break-words">
+                      {step.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Section 3: Evidence Files Included */}
           <div className="space-y-3 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900">
-                3. Evidence Files Included
+                3. Evidence Files Included ({reportModel.evidence.length})
               </h3>
-              <span className="text-xs font-semibold text-emerald-700">
-                All 4 files locked
+              <span className="text-xs font-semibold text-emerald-700 tabular-nums">
+                {reportModel.integrity.verifiedIntactCount} /{' '}
+                {reportModel.evidence.length} files locked
               </span>
             </div>
 
-            <div className="border border-slate-200 rounded-xl overflow-hidden min-w-0">
-              <div className="overflow-x-auto min-w-0">
-                <table className="w-full text-left text-xs min-w-[480px]">
-                  <thead>
-                    <tr className="bg-[#F6F8FC] border-b border-slate-200 text-[11px] text-slate-500">
-                      <th className="py-2.5 px-3 font-semibold">Code</th>
-                      <th className="py-2.5 px-3 font-semibold">File name</th>
-                      <th className="py-2.5 px-3 font-semibold">Fingerprint (SHA-256)</th>
-                      <th className="py-2.5 px-3 font-semibold text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {(
-                      reportData?.evidenceManifest || [
-                        {
-                          evidenceCode: 'EVD-001',
-                          originalFilename: 'sms_phishing_lure_capture.png',
-                          sha256Hash: '9a3f2b18c4e5d6a789012345',
-                        },
-                        {
-                          evidenceCode: 'EVD-002',
-                          originalFilename: 'mitm_credential_session.pcap',
-                          sha256Hash: 'e7b8c9d0a1b2c3d456789012',
-                        },
-                        {
-                          evidenceCode: 'EVD-003',
-                          originalFilename: 'upi_transfer_receipt_UTR627491830521.png',
-                          sha256Hash: '3c4d5e6f7a8b9c0d12345678',
-                        },
-                        {
-                          evidenceCode: 'EVD-004',
-                          originalFilename: 'binance_p2p_usdt_cashout.pdf',
-                          sha256Hash: '5e6f7a8b9c0d1e2f34567890',
-                        },
-                      ]
-                    ).map((ev: any, idx: number) => (
-                      <tr key={idx} className="hover:bg-slate-50/70">
-                        <td className="py-2.5 px-3 font-mono font-bold text-blue-700 whitespace-nowrap">
-                          {ev.evidenceCode}
-                        </td>
-                        <td className="py-2.5 px-3 font-medium text-slate-900 truncate max-w-xs">
-                          {ev.originalFilename}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-slate-600">
-                          {ev.sha256Hash?.slice(0, 14)}…
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#E7F6EF] text-[#0E6B45]">
-                            Locked ✓
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {reportModel.evidence.length === 0 ? (
+              <div className="p-4 rounded-xl bg-[#F6F8FC] border border-slate-200/80 text-xs text-slate-500">
+                No evidence artifacts ingested for this case yet.
               </div>
+            ) : (
+              <div className="border border-slate-200 rounded-xl overflow-hidden min-w-0">
+                <div className="overflow-x-auto min-w-0">
+                  <table className="w-full text-left text-xs min-w-[540px]">
+                    <thead>
+                      <tr className="bg-[#F6F8FC] border-b border-slate-200 text-[11px] text-slate-500">
+                        <th className="py-2.5 px-3 font-semibold">Code</th>
+                        <th className="py-2.5 px-3 font-semibold">File name</th>
+                        <th className="py-2.5 px-3 font-semibold">Size</th>
+                        <th className="py-2.5 px-3 font-semibold">
+                          Fingerprint (SHA-256)
+                        </th>
+                        <th className="py-2.5 px-3 font-semibold text-right">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reportModel.evidence.map((ev) => (
+                        <tr key={ev.id} className="hover:bg-slate-50/70">
+                          <td className="py-2.5 px-3 font-mono font-bold text-blue-700 whitespace-nowrap">
+                            {ev.evidenceCode}
+                          </td>
+                          <td className="py-2.5 px-3 font-medium text-slate-900 break-all max-w-xs">
+                            {ev.filename}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-500 whitespace-nowrap tabular-nums">
+                            {ev.sizeFormatted}
+                          </td>
+                          <td
+                            className="py-2.5 px-3 font-mono text-[11px] text-slate-600 break-all"
+                            title={ev.sha256Fingerprint}
+                          >
+                            {ev.sha256Fingerprint}
+                          </td>
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                ev.verificationStatus.startsWith('TAMPER_DETECTED')
+                                  ? 'bg-rose-50 text-rose-700'
+                                  : 'bg-[#E7F6EF] text-[#0E6B45]'
+                              }`}
+                            >
+                              {ev.verificationStatus.startsWith('TAMPER_DETECTED')
+                                ? 'Tampered !'
+                                : 'Locked ✓'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Entity & Graph Summary + Key Findings */}
+          <div className="space-y-3 min-w-0">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">
+                4. Correlated Entities &amp; Key Findings
+              </h3>
+              <span className="text-xs font-mono text-slate-500 tabular-nums">
+                {reportModel.entities.length} entities •{' '}
+                {reportModel.relationships.length} relationships
+              </span>
+            </div>
+
+            {reportModel.entities.length > 0 && (
+              <div className="flex flex-wrap gap-2 font-mono text-xs">
+                {reportModel.entities.slice(0, 6).map((ent) => (
+                  <span
+                    key={ent.id}
+                    className="bg-[#F6F8FC] text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 break-all select-all"
+                  >
+                    {ent.plainCategory}: <strong>{ent.displayLabel}</strong> (
+                    {ent.confidencePct})
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-3.5 space-y-1.5 text-xs">
+              <div className="font-bold text-slate-800">
+                Principal Risk: {reportModel.summary.principalRisk}
+              </div>
+              <ul className="list-disc pl-4 space-y-1 text-slate-600">
+                {reportModel.warnings.map((w) => (
+                  <li key={w.id} className="leading-snug break-words">
+                    <strong>{w.sourceRef} ({w.category}):</strong> {w.whatWasFound}
+                  </li>
+                ))}
+                {reportModel.conclusion.nextReviewPoints.map((pt, idx) => (
+                  <li key={`pt-${idx}`} className="leading-snug break-words">
+                    {pt}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
 
-          {/* Section 4: Investigator Sign-Off */}
+          {/* Section 5: Investigator Sign-Off */}
           <div className="space-y-3 min-w-0">
             <h3 className="text-sm font-bold text-slate-900">
-              4. Investigator Sign-Off
+              5. Investigator Sign-Off &amp; Chain-of-Custody Attestation
             </h3>
             <div className="rounded-xl bg-[#F6F8FC] border border-slate-200/80 p-5 space-y-3 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-3">
                 <div className="flex items-center gap-2">
                   <FileSignature className="w-5 h-5 text-emerald-600" />
                   <span className="font-bold text-slate-900 text-sm">
-                    Signed by: {activeCase.leadInvestigatorName || 'Arjun Verma'}
+                    Signed by: {reportModel.metrics.leadInvestigator}
                   </span>
                 </div>
                 <span className="text-blue-700 font-semibold text-xs">
-                  Lead Investigator
+                  {reportModel.metadata.preparedBy}
                 </span>
               </div>
               <p className="text-slate-600 leading-relaxed">
-                I confirm that all digital evidence files listed in this report were locked on upload with SHA-256 digital fingerprints and verified against the case tamper-proof chain with zero unauthorized changes.
+                {reportModel.conclusion.summaryStatement}
               </p>
               <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 font-mono">
-                <span className="truncate">
+                <span className="break-all">
                   Report Seal:{' '}
                   <strong className="text-emerald-700 select-all">
-                    {reportData?.digitalSignature ||
-                      'f8a42b19e7c30d5a6b8e1f2a3c4d5e6f7a8b9c0d1e2f3a4b'}
+                    {reportModel.integrity.headMerkleHash}
                   </strong>
                 </span>
-                <span className="text-emerald-700 font-bold">Verified ✓</span>
+                <span className="text-emerald-700 font-bold shrink-0">
+                  {reportModel.integrity.custodyEntries.length} custody entries ✓
+                </span>
               </div>
             </div>
           </div>
@@ -457,8 +708,8 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
               <h2 className="text-base font-bold text-slate-900">
                 Is this ready for court?
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#E7F6EF] text-[#0E6B45]">
-                5 / 5 Ready
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#E7F6EF] text-[#0E6B45] tabular-nums">
+                {readyChecklistCount} / {checklistItems.length} Ready
               </span>
             </div>
 
@@ -468,7 +719,11 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
                   key={idx}
                   className="p-3 rounded-xl bg-[#F6F8FC] border border-slate-200/80 flex items-start gap-2.5 min-w-0"
                 >
-                  <CheckCircle2 className="w-4 h-4 text-[#129960] shrink-0 mt-0.5" />
+                  {item.ready ? (
+                    <CheckCircle2 className="w-4 h-4 text-[#129960] shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  )}
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-slate-900">
                       {item.title}
@@ -530,3 +785,4 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
     </div>
   );
 };
+
