@@ -19,33 +19,11 @@ import {
   ChevronDown,
   Menu,
   X,
+  PhoneCall,
+  AlertTriangle,
 } from 'lucide-react';
 import { ForensicCaseSummary } from '../types';
 import { BrandLogo } from './ui/BrandLogo';
-
-// Dynamic import for 3D Evidence Prism scene (keeps initial bundle small)
-const EvidencePrism3D = lazy(() => import('./landing/EvidencePrism3D'));
-
-const EvidencePrismLoadingFallback = () => (
-  <div className="cf-card w-full h-full min-h-[460px] rounded-[20px] p-6 flex flex-col justify-between animate-pulse text-slate-900">
-    <div className="flex items-center justify-between pb-4 border-b border-slate-200">
-      <div className="flex items-center gap-2">
-        <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-        <span className="text-sm font-semibold text-slate-800">
-          Loading 3D evidence preview...
-        </span>
-      </div>
-      <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600">
-        3D Preview
-      </span>
-    </div>
-    <div className="flex flex-col items-center justify-center py-16 bg-[#F6F8FC] rounded-xl my-3">
-      <div className="w-16 h-16 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
-      <span className="text-xs text-slate-500 mt-4">Preparing interactive crystal...</span>
-    </div>
-    <div className="h-14 rounded-xl bg-slate-100 border border-slate-200" />
-  </div>
-);
 
 export type WorkspaceTabType =
   | 'OVERVIEW'
@@ -63,6 +41,7 @@ interface HomeLandingViewProps {
   onNavigate: (tab: WorkspaceTabType) => void;
   onOpenAuthPortal: (mode: 'LOGIN' | 'SIGNUP') => void;
   onRunGlobalVerify: () => void;
+  onOpenCitizenPortal?: (initialStep?: number, isGoldenHour?: boolean) => void;
 }
 
 const HOME_LINKS = [
@@ -80,6 +59,7 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
   onNavigate,
   onOpenAuthPortal,
   onRunGlobalVerify,
+  onOpenCitizenPortal,
 }) => {
   const [isAuditing, setIsAuditing] = useState<boolean>(false);
   const [activeNavSection, setActiveNavSection] = useState<string>('workflow');
@@ -466,15 +446,83 @@ export const HomeLandingView: React.FC<HomeLandingViewProps> = ({
               </div>
             </div>
 
-            {/* Visual Side: Light 3D Interactive Evidence Prism Stage (5 Columns) */}
+            {/* Visual Side: Dual-Portal Emergency Intake & Officer Command Card (5 Columns) */}
             <div className="lg:col-span-5 min-w-0">
-              <div
-                id="evidence-prism-stage"
-                className="w-full min-h-[460px] overflow-hidden rounded-[20px] relative"
-              >
-                <Suspense fallback={<EvidencePrismLoadingFallback />}>
-                  <EvidencePrism3D onRunGlobalVerify={onRunGlobalVerify} />
-                </Suspense>
+              <div className="cf-card rounded-[24px] p-6 sm:p-7 flex flex-col justify-between space-y-6 shadow-sm border border-slate-200 bg-white">
+                <div>
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                        Public Cyber Emergency Gateway
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                      1930 Active
+                    </span>
+                  </div>
+
+                  {/* Golden Hour Fast Action Card */}
+                  <div className="mt-5 p-4 rounded-2xl bg-gradient-to-r from-red-50/90 to-amber-50/90 border border-red-200 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-red-700 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        Golden Hour Protocol
+                      </span>
+                      <span className="text-[10px] font-semibold text-red-800 bg-red-100/80 px-2 py-0.5 rounded-full">
+                        First 2–4 Hours
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                      Did you lose money to a scam within the last few hours? Report immediately to freeze beneficiary bank accounts before cashout.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCitizenPortal?.(1, true)}
+                      className="w-full py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
+                    >
+                      <span>⚡ Golden Hour Express Freeze</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Standard Citizen Intake CTA */}
+                  <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-blue-600" />
+                      <h3 className="text-xs font-bold text-slate-900">
+                        Report Any Cyber Crime Incident
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      UPI fraud, fake jobs, sextortion, impersonation, or loan apps. 100% device-side SHA-256 evidence sealing.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCitizenPortal?.(1, false)}
+                      className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
+                    >
+                      <span>I've Been Scammed / Hacked</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Officer & Investigator Command Access */}
+                <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Fingerprint className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span>Authorized Police / LEA personnel</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenAuthPortal('LOGIN')}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Officer Portal</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

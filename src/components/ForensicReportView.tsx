@@ -10,6 +10,9 @@ import {
   Check,
   Copy,
   FileSignature,
+  Scale,
+  Building,
+  Lock,
 } from 'lucide-react';
 import {
   ForensicCaseSummary,
@@ -447,7 +450,7 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
                   Amount involved
                 </span>
                 <span className="text-slate-900 font-bold block mt-0.5 tabular-nums">
-                  {reportModel.metrics.recordedCaseLossUsd}
+                  {reportModel.indianLaw?.bankFreezeNotice1930.exposureInr || reportModel.metrics.recordedCaseLossUsd}
                 </span>
               </div>
               <div className="bg-[#F6F8FC] p-3 rounded-xl border border-slate-200/80 min-w-0">
@@ -709,6 +712,119 @@ export const ForensicReportView: React.FC<ForensicReportViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* Section 5.1: Indian Law & Statutory Penal Enforcement */}
+          {reportModel.indianLaw && (
+            <div className="space-y-4 min-w-0 border-t border-slate-100 pt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Scale className="w-4 h-4 text-blue-600" />
+                  <h3 className="text-sm font-bold text-slate-900">
+                    5.1 Statutory Provisions &amp; Bharatiya Nyaya Sanhita (BNS) Charges
+                  </h3>
+                </div>
+                <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                  Indian Penal Matrix
+                </span>
+              </div>
+
+              {/* Primary Charge Card */}
+              <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200 text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-blue-900">{reportModel.indianLaw.bnsSection}</span>
+                  <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full font-bold">
+                    Primary Charge
+                  </span>
+                </div>
+                <p className="text-slate-700 leading-relaxed">
+                  {reportModel.indianLaw.bnsOffenceDescription}
+                </p>
+              </div>
+
+              {/* IT Act Violations Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-[#F6F8FC] border-b border-slate-200 text-[11px] text-slate-500">
+                      <th className="py-2.5 px-3 font-semibold">Statute &amp; Section</th>
+                      <th className="py-2.5 px-3 font-semibold">Offence Description</th>
+                      <th className="py-2.5 px-3 font-semibold">Statutory Penalty</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {reportModel.indianLaw.itActSections.map((s, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/70">
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {s.section}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700">{s.description}</td>
+                        <td className="py-2.5 px-3 text-slate-600 font-medium whitespace-nowrap">{s.punishment}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 1930 CFCFRMS Bank Freeze Notice Card */}
+              <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <Building className="w-3.5 h-3.5 text-amber-700" />
+                    <span>1930 CFCFRMS Emergency Bank Freeze Notice</span>
+                  </span>
+                  <span className="text-[10px] font-mono bg-white text-amber-800 px-2 py-0.5 rounded border border-amber-200 font-bold">
+                    {reportModel.indianLaw.bankFreezeNotice1930.nodalNoticeRef}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-700 pt-1">
+                  <div>
+                    <span className="text-slate-500">Beneficiary VPA: </span>
+                    <span className="font-mono font-bold text-slate-900">
+                      {reportModel.indianLaw.bankFreezeNotice1930.suspectVpa}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Destination Bank: </span>
+                    <span className="font-semibold text-slate-900">
+                      {reportModel.indianLaw.bankFreezeNotice1930.beneficiaryBank}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Transaction UTR: </span>
+                    <span className="font-mono font-bold text-blue-700">
+                      {reportModel.indianLaw.bankFreezeNotice1930.utrNumber}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Lien Exposure: </span>
+                    <span className="font-bold text-red-600">
+                      {reportModel.indianLaw.bankFreezeNotice1930.exposureInr}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* BSA Section 63(4)(c) Certificate Card */}
+              <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                    <span>{reportModel.indianLaw.bsaEvidenceCertificate.section}</span>
+                  </span>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                    Court Admissible
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-950 leading-relaxed italic">
+                  "{reportModel.indianLaw.bsaEvidenceCertificate.hashIntegrityStatement}"
+                </p>
+                <div className="flex items-center justify-between text-[10px] text-emerald-800 pt-1 border-t border-emerald-200">
+                  <span>Signatory: <strong>{reportModel.indianLaw.bsaEvidenceCertificate.certifiedBy}</strong></span>
+                  <span className="font-mono">Algorithms: {reportModel.indianLaw.bsaEvidenceCertificate.hashAlgorithms}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Section 6: Warnings and Next Steps */}
           <div className="space-y-3 min-w-0">

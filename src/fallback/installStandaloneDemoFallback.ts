@@ -906,6 +906,19 @@ export function installStandaloneDemoFallback() {
         'Investigator-entered digital forensic case.',
       victimName: bodyJson.victimName ?? existingCase?.victimName ?? 'Not recorded',
       estimatedLossUsd,
+      estimatedLossInr:
+        bodyJson.estimatedLossInr ??
+        bodyJson.lossAmountInr ??
+        existingCase?.estimatedLossInr ??
+        Math.round(estimatedLossUsd * 83.5),
+      lossAmountInr:
+        bodyJson.lossAmountInr ??
+        bodyJson.estimatedLossInr ??
+        existingCase?.lossAmountInr ??
+        Math.round(estimatedLossUsd * 83.5),
+      freezeStatus: bodyJson.freezeStatus ?? existingCase?.freezeStatus ?? 'IDLE',
+      isGoldenHour: Boolean(bodyJson.isGoldenHour ?? existingCase?.isGoldenHour ?? false),
+      citizenComplaintId: bodyJson.citizenComplaintId ?? existingCase?.citizenComplaintId,
       leadInvestigatorId: bodyJson.leadInvestigatorId || existingCase?.leadInvestigatorId || 'usr-lead-01',
       leadInvestigatorName:
         bodyJson.leadInvestigatorName || existingCase?.leadInvestigatorName || 'Cmdr. Arjun Verma',
@@ -1121,6 +1134,324 @@ export function installStandaloneDemoFallback() {
         await savePersistedWorkspaceState(state);
       }
       return jsonResp({ status: 'REANALYZED', cases: state.cases });
+    }
+    if (path.startsWith('/api/v1/cases/') && path.endsWith('/freeze') && method === 'POST') {
+      const targetId = decodeURIComponent(
+        path.replace('/api/v1/cases/', '').replace('/freeze', '').split('/')[0]
+      );
+      const existingCase = state.cases.find((c: any) => c.id === targetId);
+      if (!existingCase) {
+        return jsonResp({ error: 'Case not found' }, 404);
+      }
+      const existingBundle = state.byCase[targetId] || state.byCase['case-phantom-upi-01'];
+      existingCase.freezeStatus = 'FREEZE_REQUESTED';
+      existingCase.status = 'FREEZE_REQUESTED';
+      existingCase.updatedAt = new Date().toISOString();
+
+      if (existingBundle?.ledger?.ledger && Array.isArray(existingBundle.ledger.ledger)) {
+        const prevEntry = existingBundle.ledger.ledger[existingBundle.ledger.ledger.length - 1];
+        const nowIso = new Date().toISOString();
+        const hash = deterministicHex64(`freeze-${targetId}-${nowIso}`);
+        existingBundle.ledger.ledger.push({
+          id: `led-${Date.now().toString(16).slice(-6)}`,
+          sequenceNumber: (prevEntry?.sequenceNumber || existingBundle.ledger.ledger.length) + 1,
+          caseId: targetId,
+          actorUsername: 'arjun.verma',
+          actorRole: 'LEAD_INVESTIGATOR',
+          actionType: 'BANK_FREEZE_BROADCAST',
+          targetResource: `CFCFRMS-1930 / NPCI / LEA Gateway`,
+          details: `Emergency 1930 CFCFRMS Freeze Broadcast triggered under Golden Hour protocol for case ${existingCase.caseNumber}. Beneficiary account & associated UPI VPAs flagged for nodal lien.`,
+          previousHash: prevEntry?.entryHash || '00000000',
+          entryHash: hash,
+          hmacSignature: hash.slice(0, 32),
+          timestamp: nowIso,
+          createdAt: nowIso,
+        });
+      }
+
+      await savePersistedWorkspaceState(state);
+      return jsonResp({
+        success: true,
+        caseId: targetId,
+        caseNumber: existingCase.caseNumber,
+        freezeStatus: 'FREEZE_REQUESTED',
+        broadcastedAt: new Date().toISOString(),
+        nodesNotified: [
+          'National Cybercrime Reporting Portal (1930 CFCFRMS)',
+          'NPCI Centralized Fraud Registry Gateway',
+          'Nodal Banking Liaison (State Bank of India / HDFC / ICICI)',
+          'State Cyber Police Headquarters Command Room',
+        ],
+      });
+    }
+    if (path === '/api/v1/citizen/complaints' && method === 'POST') {
+      const complaintNumber = `CFX-MH-2026-${Math.floor(1000 + Math.random() * 8999)}`;
+      const newId = `case-citizen-${Date.now().toString(16).slice(-6)}`;
+      const lossInr = Number(bodyJson.financialLossInr) || 0;
+      const lossUsd = Math.round(lossInr / 83.5);
+      const isGoldenHour = Boolean(bodyJson.isGoldenHour);
+      const freezeStatus = isGoldenHour ? 'FREEZE_REQUESTED' : 'IDLE';
+      const nowIso = new Date().toISOString();
+
+      const entities: any[] = [];
+      const relationships: any[] = [];
+      const transactions: any[] = [];
+      const timeline: any[] = [];
+
+      const victimName = bodyJson.victimName || 'Citizen Complainant';
+      const victimId = `ent-${newId}-victim`;
+      entities.push({
+        id: victimId,
+        caseId: newId,
+        entityType: 'VICTIM',
+        normalizedValue: victimName,
+        displayLabel: victimName,
+        roleInIncident: 'VICTIM',
+        confidenceScore: 0.99,
+        riskLevel: 'LOW',
+        pagerankScore: 0.1,
+        betweennessScore: 0.05,
+        clusterId: 1,
+        osintEnrichment: {
+          phone: bodyJson.victimContact || '',
+          email: bodyJson.victimEmail || '',
+          city: bodyJson.victimCity || 'Mumbai, Maharashtra',
+          country: 'India',
+        },
+        evidenceIds: [],
+        mentions: [],
+        firstSeenAt: nowIso,
+        country: 'India',
+        city: bodyJson.victimCity || 'Mumbai',
+        lat: 19.076,
+        lon: 72.8777,
+      });
+
+      let suspectDestId = '';
+      if (bodyJson.suspectUpiId) {
+        const upiId = `ent-${newId}-upi`;
+        suspectDestId = upiId;
+        entities.push({
+          id: upiId,
+          caseId: newId,
+          entityType: 'UPI_HANDLE',
+          normalizedValue: bodyJson.suspectUpiId,
+          displayLabel: bodyJson.suspectUpiId,
+          roleInIncident: 'BENEFICIARY_MULE',
+          confidenceScore: 0.96,
+          riskLevel: 'CRITICAL',
+          pagerankScore: 0.88,
+          betweennessScore: 0.72,
+          clusterId: 2,
+          osintEnrichment: {
+            vpa: bodyJson.suspectUpiId,
+            psp: bodyJson.suspectUpiId.includes('@') ? bodyJson.suspectUpiId.split('@')[1] : 'Unknown VPA',
+            country: 'India',
+            flag: 'Flagged MULE VPA via I4C/CFCFRMS',
+          },
+          evidenceIds: [],
+          mentions: [],
+          firstSeenAt: bodyJson.incidentDateTime || nowIso,
+          country: 'India',
+          city: 'Unknown',
+          lat: 28.6139,
+          lon: 77.209,
+        });
+      }
+
+      if (bodyJson.suspectBankAccount) {
+        const bankId = `ent-${newId}-bank`;
+        if (!suspectDestId) suspectDestId = bankId;
+        entities.push({
+          id: bankId,
+          caseId: newId,
+          entityType: 'BANK_ACCOUNT',
+          normalizedValue: bodyJson.suspectBankAccount,
+          displayLabel: `${bodyJson.suspectBankAccount} (${bodyJson.suspectBankIfsc || 'IFSC Unknown'})`,
+          roleInIncident: 'BENEFICIARY_MULE',
+          confidenceScore: 0.95,
+          riskLevel: 'CRITICAL',
+          pagerankScore: 0.84,
+          betweennessScore: 0.65,
+          clusterId: 2,
+          osintEnrichment: {
+            accountNumber: bodyJson.suspectBankAccount,
+            ifsc: bodyJson.suspectBankIfsc || 'N/A',
+            country: 'India',
+          },
+          evidenceIds: [],
+          mentions: [],
+          firstSeenAt: bodyJson.incidentDateTime || nowIso,
+          country: 'India',
+        });
+      }
+
+      if (bodyJson.suspectPhoneNumber) {
+        const phoneId = `ent-${newId}-phone`;
+        entities.push({
+          id: phoneId,
+          caseId: newId,
+          entityType: 'PHONE_NUMBER',
+          normalizedValue: bodyJson.suspectPhoneNumber,
+          displayLabel: bodyJson.suspectPhoneNumber,
+          roleInIncident: 'THREAT_ACTOR',
+          confidenceScore: 0.94,
+          riskLevel: 'CRITICAL',
+          pagerankScore: 0.75,
+          betweennessScore: 0.55,
+          clusterId: 2,
+          osintEnrichment: {
+            carrier: 'VoIP / Disposable SIM (Telecom Circle Mumbai/MH)',
+            callerIdFlag: 'High Risk - Reported Fraud on 1930',
+          },
+          evidenceIds: [],
+          mentions: [],
+          firstSeenAt: bodyJson.incidentDateTime || nowIso,
+          country: 'India',
+        });
+      }
+
+      if (lossInr > 0 && suspectDestId) {
+        const txId = `tx-${newId}-1`;
+        transactions.push({
+          id: txId,
+          caseId: newId,
+          fromEntityId: victimId,
+          fromParty: victimName,
+          toEntityId: suspectDestId,
+          toParty: bodyJson.suspectUpiId || bodyJson.suspectBankAccount || 'Suspect Mule',
+          amount: lossInr,
+          currency: 'INR',
+          timestamp: bodyJson.incidentDateTime || nowIso,
+          channel: bodyJson.suspectUpiId ? 'UPI' : 'IMPS/NEFT',
+          referenceId: bodyJson.transactionReferenceUtr || `UTR${Date.now().toString().slice(-12)}`,
+          notes: `Victim complaint reported transfer: ₹${lossInr.toLocaleString('en-IN')}`,
+        });
+        relationships.push({
+          id: `rel-${newId}-tx`,
+          caseId: newId,
+          sourceEntityId: victimId,
+          targetEntityId: suspectDestId,
+          relationshipType: 'FRAUDULENT_TRANSFER',
+          label: `₹${lossInr.toLocaleString('en-IN')} (UTR: ${bodyJson.transactionReferenceUtr || 'Pending'})`,
+          weight: 9.8,
+          confidence: 0.98,
+          eventTimestamp: bodyJson.incidentDateTime || nowIso,
+        });
+      }
+
+      const rawEv = Array.isArray(bodyJson.evidenceFiles) ? bodyJson.evidenceFiles : [];
+      const evidenceList = rawEv.map((f: any, idx: number) => ({
+        id: `evd-${newId}-${idx + 1}`,
+        caseId: newId,
+        evidenceCode: `EVD-${String(idx + 1).padStart(3, '0')}`,
+        originalFilename: f.name || `Citizen_Evidence_${idx + 1}.png`,
+        evidenceCategory: 'CITIZEN_UPLOAD',
+        detectedMimeType: f.type || 'image/png',
+        fileSizeBytes: f.size || 102400,
+        storagePath: `/evidence/${newId}/${f.name || 'doc.png'}`,
+        sha256Hash: f.sha256 || deterministicHex64(`evd-${newId}-${idx}-${f.name}`),
+        blake3Hash: deterministicHex64(`blake-${newId}-${idx}-${f.name}`),
+        clientProvidedSha256: f.sha256 || '',
+        transitVerified: true,
+        integrityStatus: 'VERIFIED_INTACT',
+        exifMetadata: {
+          Origin: 'Citizen Emergency Portal Upload',
+          'Client-Verified-SHA256': f.sha256 || 'Verified at Browser Gateway',
+        },
+        ocrRawText: `Incident: ${bodyJson.incidentType}\nDescription: ${bodyJson.description || ''}\nReference: ${bodyJson.transactionReferenceUtr || ''}\nAmount: ₹${lossInr}`,
+        ocrConfidence: 0.97,
+        boundingBoxes: [],
+        processingStage: 'SEALED',
+        timestampAnomaly: false,
+        uploadedBy: victimName,
+        uploadedAt: nowIso,
+        lastVerifiedAt: nowIso,
+      }));
+
+      timeline.push({
+        id: `tl-${newId}-1`,
+        caseId: newId,
+        eventTimestamp: bodyJson.incidentDateTime || nowIso,
+        timestampSource: 'VICTIM_TESTIMONY',
+        killChainPhase: 'EXPLOITATION',
+        severity: 'HIGH',
+        title: `${bodyJson.incidentType || 'Cyber Incident'} Occurred`,
+        description: bodyJson.description || 'Citizen reported cyber incident.',
+        actorEntity: bodyJson.suspectPhoneNumber || bodyJson.suspectUpiId || 'Threat Actor',
+        targetEntity: victimName,
+        amountInvolved: lossInr > 0 ? `₹${lossInr.toLocaleString('en-IN')}` : undefined,
+        linkedEntityIds: [victimId, ...(suspectDestId ? [suspectDestId] : [])],
+        anomalyFlag: false,
+        confidence: 0.95,
+      });
+
+      timeline.push({
+        id: `tl-${newId}-2`,
+        caseId: newId,
+        eventTimestamp: nowIso,
+        timestampSource: 'PORTAL_INGESTION',
+        killChainPhase: 'RESPONSE_AND_CONTAINMENT',
+        severity: isGoldenHour ? 'CRITICAL' : 'MEDIUM',
+        title: isGoldenHour ? 'Golden Hour Emergency Intake & Freeze Command Broadcast' : 'Citizen Intake Sealed into Evidence Vault',
+        description: `Complaint ${complaintNumber} filed by ${victimName}. Cryptographic SHA-256 seal issued.`,
+        actorEntity: 'CyberFusion Intake Gateway',
+        targetEntity: victimName,
+        linkedEntityIds: [victimId],
+        anomalyFlag: false,
+        confidence: 1.0,
+      });
+
+      const structuredPayload = {
+        title: `${bodyJson.incidentType || 'Cyber Crime Incident'} — ${victimName}`,
+        incidentType: bodyJson.incidentType || 'FINANCIAL_FRAUD',
+        victimName,
+        severity: isGoldenHour || lossInr > 50000 ? 'CRITICAL' : 'HIGH',
+        estimatedLossUsd: lossUsd,
+        estimatedLossInr: lossInr,
+        lossAmountInr: lossInr,
+        freezeStatus,
+        isGoldenHour,
+        citizenComplaintId: complaintNumber,
+        summary: bodyJson.description || `Online complaint received via Citizen Portal for ${bodyJson.incidentType}. Loss: ₹${lossInr.toLocaleString('en-IN')}.`,
+        description: bodyJson.description || 'Citizen complaint submitted via self-service portal.',
+        jurisdictionCountry: 'India',
+        leadUnit: 'Maharashtra Cyber Crime Branch — Financial Intelligence Unit',
+        entities,
+        relationships,
+        transactions,
+        evidence: evidenceList,
+        timeline,
+        riskScore: isGoldenHour ? 92 : 75,
+      };
+
+      const { updatedCase, updatedBundle } = hydrateStructuredCasePayload(
+        newId,
+        complaintNumber,
+        structuredPayload
+      );
+
+      state.cases.unshift(updatedCase);
+      state.byCase[newId] = updatedBundle;
+      await savePersistedWorkspaceState(state);
+
+      return jsonResp(
+        {
+          success: true,
+          complaintId: complaintNumber,
+          caseId: newId,
+          caseNumber: complaintNumber,
+          case: updatedCase,
+          freezeStatus,
+          isGoldenHour,
+          receivedAt: nowIso,
+        },
+        201
+      );
+    }
+    if (path.startsWith('/api/v1/citizen/complaints') && method === 'GET') {
+      const qCase = state.cases.filter((c: any) => c.citizenComplaintId || c.caseOrigin === 'USER_CREATED');
+      return jsonResp({ complaints: qCase });
     }
 
     const caseId =

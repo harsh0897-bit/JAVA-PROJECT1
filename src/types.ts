@@ -52,6 +52,11 @@ export interface ForensicCaseSummary {
   summary: string;
   victimName: string;
   estimatedLossUsd: number;
+  estimatedLossInr?: number;
+  lossAmountInr?: number;
+  citizenComplaintId?: string;
+  freezeStatus?: 'IDLE' | 'FREEZE_REQUESTED' | 'FREEZE_CONFIRMED';
+  isGoldenHour?: boolean;
   leadInvestigatorId: string;
   leadInvestigatorName: string;
   createdAt: string;
@@ -206,3 +211,59 @@ export interface ShortestPathResult {
   narrativeSteps: string[];
   orderedEntityIds?: string[];
 }
+
+export interface CitizenEvidenceFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  sha256?: string;
+  blake3?: string;
+  dataUrl?: string;
+  detectedEntities?: string[];
+  status: 'PENDING' | 'HASHED' | 'VERIFIED';
+}
+
+export interface CitizenComplaint {
+  complaintId?: string;
+  step: number;
+  language: 'EN' | 'HI' | 'MR';
+  incidentType: string;
+  incidentDateTime: string;
+  financialLossInr: number;
+  suspectUpiId?: string;
+  suspectBankAccount?: string;
+  suspectBankIfsc?: string;
+  suspectPhoneNumber?: string;
+  suspectPlatform?: string;
+  transactionReferenceUtr?: string;
+  description: string;
+  evidenceFiles: CitizenEvidenceFile[];
+  extractedEntities?: {
+    type: string;
+    value: string;
+    confidence: number;
+  }[];
+  status: 'SUBMITTED' | 'ASSIGNED' | 'FREEZE_REQUESTED' | 'UNDER_ANALYSIS' | 'CHARGE_SHEETED';
+  victimName: string;
+  victimContact: string;
+  victimEmail?: string;
+  victimCity?: string;
+  victimState?: string;
+  isGoldenHour?: boolean;
+  createdAt?: string;
+}
+
+export interface GoldenHourStatus {
+  caseId: string;
+  isEligible: boolean;
+  incidentTimestamp: string;
+  elapsedMinutes: number;
+  remainingMinutes: number;
+  freezeStatus: 'IDLE' | 'FREEZE_REQUESTED' | 'FREEZE_CONFIRMED' | 'FAILED';
+  targetUpi?: string;
+  targetBank?: string;
+  utr?: string;
+  lossInr: number;
+}
+

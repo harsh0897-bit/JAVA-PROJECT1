@@ -97,6 +97,23 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
+const inrFormatter = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  maximumFractionDigits: 0,
+});
+
+function formatCaseLoss(c: ForensicCaseSummary): string {
+  const inr = c.lossAmountInr || c.estimatedLossInr;
+  if (inr && inr > 0) {
+    return inrFormatter.format(inr);
+  }
+  if (c.estimatedLossUsd && c.estimatedLossUsd > 0) {
+    return usdFormatter.format(c.estimatedLossUsd);
+  }
+  return '₹0';
+}
+
 function cleanPersonaDisplayName(fullName?: string): string {
   if (!fullName) return 'Cmdr. Arjun Verma';
   return fullName.replace(/\s*\([^)]*\)\s*$/, '').trim();
@@ -528,8 +545,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </span>
 
           <span className="flex flex-col min-w-0 flex-1 leading-tight">
-            <span className="text-[12px] font-medium text-slate-500 whitespace-nowrap">
-              Active case
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[12px] font-medium text-slate-500 whitespace-nowrap">
+                Active case
+              </span>
+              {activeCase?.isGoldenHour && (
+                <span className="text-[9px] font-bold px-1 rounded bg-rose-100 text-rose-700 border border-rose-200">
+                  ⚡ 1930
+                </span>
+              )}
             </span>
             <span className="text-[14px] font-mono font-semibold text-slate-900 truncate tabular-nums mt-0.5">
               {activeCase?.caseNumber || 'CASE-2026-0841'}
@@ -737,18 +761,39 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 </div>
 
                 <div className="min-w-0 flex flex-col justify-center">
-                  {/* Line 1: Case title + case number */}
-                  <div className="flex items-center gap-2 min-w-0">
+                  {/* Line 1: Case title + case number + badges */}
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
                     <span className="text-[14px] font-semibold text-slate-900 truncate">
                       {c.title}
                     </span>
                     <span className="font-mono text-[12px] text-slate-500 shrink-0 tabular-nums">
                       {c.caseNumber}
                     </span>
+                    {c.citizenComplaintId && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 shrink-0 uppercase tracking-wider">
+                        Citizen Intake
+                      </span>
+                    )}
+                    {c.isGoldenHour && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 shrink-0 flex items-center gap-0.5">
+                        ⚡ Golden Hour
+                      </span>
+                    )}
                   </div>
-                  {/* Line 2: Victim name + loss */}
-                  <div className="text-[13px] text-slate-600 truncate mt-0.5 tabular-nums">
-                    {c.victimName} · {usdFormatter.format(c.estimatedLossUsd || 0)} ({c.severity})
+                  {/* Line 2: Victim name + loss + status */}
+                  <div className="text-[13px] text-slate-600 truncate mt-0.5 tabular-nums flex items-center gap-1.5 flex-wrap">
+                    <span>{c.victimName}</span>
+                    <span>·</span>
+                    <span className="font-semibold text-slate-800">{formatCaseLoss(c)}</span>
+                    <span>·</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[11px] font-medium border ${getSeverityBadgeClasses(c.severity)}`}>
+                      {c.severity}
+                    </span>
+                    {c.freezeStatus === 'FREEZE_REQUESTED' && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        Lien Requested
+                      </span>
+                    )}
                   </div>
                 </div>
 

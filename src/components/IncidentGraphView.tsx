@@ -1157,7 +1157,7 @@ export const IncidentGraphView: React.FC<IncidentGraphViewProps> = ({
       }
 
       // D2: Trackpad pinch (e.ctrlKey === true without physical modifier key)
-      const isPinch = e.ctrlKey && !physicalKey;
+      const isPinch = e.ctrlKey && !isPhysicalCtrlOrMetaPressed();
 
       const currentZoom = zoomRef.current;
 

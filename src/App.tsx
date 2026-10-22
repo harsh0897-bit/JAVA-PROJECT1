@@ -28,17 +28,21 @@ import { ForensicReportView } from './components/ForensicReportView';
 import { WorkspaceHeader } from './components/layout/WorkspaceHeader';
 import { InvestigationStepper } from './components/layout/InvestigationStepper';
 import { Modal } from './components/ui/Modal';
-import { NewCaseWizardModal } from './components/NewCaseWizardModal';
+import { CitizenPortalView } from './components/CitizenPortalView';
+import { CitizenComplaint } from './types';
 
-export type AppStage = 'HOME' | 'AUTH' | 'WORKSPACE';
+export type AppStage = 'HOME' | 'AUTH' | 'WORKSPACE' | 'CITIZEN_PORTAL';
 export type TabType = WorkspaceTabType;
 
 export function App() {
-  // 3-Stage Sequenced User Flow:
+  // 4-Stage Sequenced User Flow:
   // 1. HOME (Standalone Project Home Page at start of website)
   // 2. AUTH (Login / Sign Up / Investigator Portal accessible from Home Page)
   // 3. WORKSPACE (Authenticated Sequenced Forensic Investigation Workspace)
+  // 4. CITIZEN_PORTAL (Self-Service Citizen Crime Intake & Golden Hour Gateway)
   const [appStage, setAppStage] = useState<AppStage>('HOME');
+  const [citizenPortalStep, setCitizenPortalStep] = useState<number>(1);
+  const [citizenGoldenHour, setCitizenGoldenHour] = useState<boolean>(false);
   const [authInitialMode, setAuthInitialMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<TabType>('OVERVIEW');
@@ -74,8 +78,6 @@ export function App() {
   const [sseStatus, setSseStatus] = useState<string>(
     'Java 21 Virtual Threads & SSE Active'
   );
-  const [showNewCaseModal, setShowNewCaseModal] = useState(false);
-  const [caseModalMode, setCaseModalMode] = useState<'CREATE' | 'EDIT'>('CREATE');
 
   // Global Cmd+K Search State
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -421,49 +423,52 @@ export function App() {
     }
   };
 
-  const handleSubmitCaseWizard = async (payload: any) => {
-    const isEdit = caseModalMode === 'EDIT' && activeCase;
-    const url = isEdit
-      ? `/api/v1/cases/${encodeURIComponent(activeCase.id)}`
-      : '/api/v1/cases';
-    const method = isEdit ? 'PUT' : 'POST';
-
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showToast(data.error || 'Failed to save case', 'error');
-      throw new Error(data.error || 'Failed to save case');
-    }
-    const targetId = data.id || activeCaseId;
-    setActiveCaseId(targetId);
-    await loadCaseWorkspaceData(targetId);
-    if (!isEdit) {
-      setActiveTab('OVERVIEW');
-      showToast(`Case created (${data.caseNumber})`, 'success');
-    } else {
-      showToast(`Case updated (${data.caseNumber || activeCase?.caseNumber})`, 'success');
+  const handleBankFreeze = async (caseId: string) => {
+    try {
+      const res = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/freeze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to broadcast bank freeze', 'error');
+        return;
+      }
+      await loadCaseWorkspaceData(caseId);
+      showToast(
+        `Emergency 1930 CFCFRMS Freeze Broadcasted! Beneficiary accounts flagged for nodal lien.`,
+        'success'
+      );
+    } catch {
+      showToast('Error broadcasting bank freeze command', 'error');
     }
   };
 
-  const handleDeleteCase = async (caseId: string) => {
-    const res = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
+  const handleCitizenComplaintSubmit = async (complaint: CitizenComplaint) => {
+    const res = await fetch('/api/v1/citizen/complaints', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(complaint),
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.error || 'Could not delete case', 'error');
-      throw new Error(data.error || 'Could not delete case');
+      showToast(data.error || 'Could not register citizen complaint', 'error');
+      throw new Error(data.error);
     }
-    const nextCaseId = 'case-phantom-upi-01';
-    setActiveCaseId(nextCaseId);
-    await loadCaseWorkspaceData(nextCaseId);
-    setActiveTab('OVERVIEW');
-    showToast('Deleted case from workspace', 'info');
+    if (data.caseId) {
+      setActiveCaseId(data.caseId);
+      await loadCaseWorkspaceData(data.caseId);
+    } else {
+      await loadCaseWorkspaceData(activeCaseId);
+    }
+    showToast(
+      `Citizen Complaint Registered: ${data.complaintId || data.caseNumber} (SHA-256 Sealed)`,
+      'success'
+    );
+    return {
+      complaintId: data.complaintId || data.caseNumber,
+      caseId: data.caseId,
+    };
   };
 
   const handleUploadFile = async (
@@ -743,8 +748,46 @@ export function App() {
             setAppStage('AUTH');
           }}
           onRunGlobalVerify={handleVerifyAllCaseEvidence}
+          onOpenCitizenPortal={(step = 1, isGolden = false) => {
+            setCitizenPortalStep(step);
+            setCitizenGoldenHour(isGolden);
+            setAppStage('CITIZEN_PORTAL');
+          }}
         />
       </>
+    );
+  }
+
+  // =========================================================================
+  // STAGE: CITIZEN EMERGENCY INTAKE PORTAL
+  // =========================================================================
+  if (appStage === 'CITIZEN_PORTAL') {
+    return (
+      <CitizenPortalView
+        initialStep={citizenPortalStep}
+        initialGoldenHour={citizenGoldenHour}
+        onBackToHome={() => setAppStage('HOME')}
+        onOpenOfficerPortal={() => {
+          if (currentUser) {
+            setIsAuthenticated(true);
+            setAppStage('WORKSPACE');
+          } else {
+            const defaultOfficer: UserProfile = availableUsers[0] || {
+              id: 'usr-lead-01',
+              username: 'arjun.verma',
+              fullName: 'Cmdr. Arjun Verma',
+              email: 'arjun.verma@cyberfusion.mh.gov.in',
+              role: 'LEAD_INVESTIGATOR',
+              department: 'Maharashtra Cyber Crime Branch — BKC',
+              clearanceBadge: 'CFX-MH-COMMANDER-01',
+            };
+            setCurrentUser(defaultOfficer);
+            setIsAuthenticated(true);
+            setAppStage('WORKSPACE');
+          }
+        }}
+        onSubmitComplaint={handleCitizenComplaintSubmit}
+      />
     );
   }
 
@@ -796,8 +839,9 @@ export function App() {
             activeCaseId={activeCaseId}
             onSelectCase={handleSwitchCase}
             onOpenNewCaseModal={() => {
-              setCaseModalMode('CREATE');
-              setShowNewCaseModal(true);
+              setCitizenPortalStep(1);
+              setCitizenGoldenHour(false);
+              setAppStage('CITIZEN_PORTAL');
             }}
             onReanalyzeCase={handleReanalyzeCase}
             onResetDemo={handleResetDemo}
@@ -864,10 +908,7 @@ export function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSelectEntityForGraph={(id) => setSelectedEntityId(id)}
             onSelectEvidenceForVault={(id) => setSelectedEvidenceId(id)}
-            onEditCase={() => {
-              setCaseModalMode('EDIT');
-              setShowNewCaseModal(true);
-            }}
+            onBroadcastFreeze={handleBankFreeze}
           />
         )}
 
@@ -1042,22 +1083,6 @@ export function App() {
           </div>
         </div>
       </Modal>
-
-      {/* Multi-Step Case Creation & Editing Wizard Modal */}
-      <NewCaseWizardModal
-        isOpen={showNewCaseModal}
-        mode={caseModalMode}
-        onClose={() => setShowNewCaseModal(false)}
-        existingCases={cases}
-        defaultInvestigatorName={currentUser?.fullName}
-        initialCase={caseModalMode === 'EDIT' ? activeCase : null}
-        initialEntities={caseModalMode === 'EDIT' ? entities : undefined}
-        initialRelationships={caseModalMode === 'EDIT' ? relationships : undefined}
-        initialTimeline={caseModalMode === 'EDIT' ? timeline : undefined}
-        initialEvidence={caseModalMode === 'EDIT' ? evidenceList : undefined}
-        onSubmitCase={handleSubmitCaseWizard}
-        onDeleteCase={caseModalMode === 'EDIT' ? handleDeleteCase : undefined}
-      />
     </div>
   );
 }

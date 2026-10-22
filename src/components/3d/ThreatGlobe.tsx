@@ -1259,7 +1259,7 @@ export const ThreatGlobe: React.FC<ThreatGlobeProps> = ({
 
       // D2: Trackpad pinch (e.ctrlKey === true without physical modifier key).
       // Prevent whole browser page zoom while zooming globe canvas.
-      const isPinch = e.ctrlKey && !physicalKey;
+      const isPinch = e.ctrlKey && !isPhysicalCtrlOrMetaPressed();
 
       if (!isEngagedRef.current && !isPinch) {
         return; // Allow page to scroll naturally if not engaged and not pinching

@@ -7,7 +7,10 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "backend:build": "javac -cp \"backend/lib/h2.jar\" -d backend/bin backend/src/com/cyberfusionx/util/*.java backend/src/com/cyberfusionx/db/*.java backend/src/com/cyberfusionx/server/*.java",
+    "backend:start": "java -cp \"backend/bin;backend/lib/h2.jar\" com.cyberfusionx.server.CyberFusionServer",
+    "backend": "npm run backend:build && npm run backend:start"
   },
   "dependencies": {
     "@react-three/fiber": "^8.17.10",
