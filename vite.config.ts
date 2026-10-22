@@ -106,7 +106,7 @@ export default defineConfig({
     allowedHosts: true,
   },
   build: {
-    outDir: 'public-spa',
+    outDir: 'dist',
   },
 });
 

@@ -1,6 +1,6 @@
 {
   "buildCommand": "vite build",
-  "outputDirectory": "public-spa",
+  "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
     {
